@@ -1,13 +1,32 @@
-创建环境：conda create -n rekep-piper python=3.10
+
+# ReKep-Reproduction-PiPER
+这个项目是在松灵机器人的PiPER机械臂上复现[Rekep](https://rekep-robot.github.io/)。
+
+## 安装
+创建环境：
+```bash
+conda create -n rekep-piper python=3.10
+conda activate rekep-piper
+cd ./Rekep-Reproduction-PiPER
+pip install -r requirements.txt
+sudo apt update && sudo apt install can-utils ethtool
+```
+根据PiPER官方说明安装piper_sdk
+需要先完成手眼标定[PiPER手眼标定教程](./docs/hand-eye-calib.md)
+
+
+## 进展
+- [x] 实现PiPER控制器
+- [ ] 
+- [ ] 
+
+
+## 文件说明
++ [real_camera.py](./real_camera.py): 获取realsense相机出厂默认内参，并拍摄图像
 
 
 
-PiPER送的相机型号是orbbec的Dabai
-安装orbbec的python sdk，
-https://github.com/orbbec/pyorbbecsdk
 
-
-进行相机的内外参标定和手眼标定
-内参暂时使用默认参数。
-
-根据https://github.com/agilexrobotics/handeye_calibration_ros.git进行外参标定和手眼标定
+## 参考代码仓库
+https://github.com/heyjiacheng/Rekep-ur5/tree/main
+https://github.com/agilexrobotics/piper_sdk/tree/master
