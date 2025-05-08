@@ -137,7 +137,7 @@ class PiperController:
         :param force: Force applied by the gripper (default: 100).
         :param close: Whether to close (True) or open (False) the gripper.
         """
-        # TODO width to gripper_angle
+        # TODO width to gripper_angle 
         angle = None
         pass
 
