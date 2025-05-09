@@ -47,10 +47,10 @@ class PiPERIKSolver:
             6: [self._a[5], self._alpha[5], self._d[5], self._theta[5]] # Joint 6 (end effector)
         }
         
-        # Joint limits (in radians) for UR5
+        # Joint limits (in radians) for PiPER
         self.joint_limits = {
-            'lower': np.array([-2*np.pi, -2*np.pi, -2*np.pi, -2*np.pi, -2*np.pi, -2*np.pi]),
-            'upper': np.array([2*np.pi, 2*np.pi, 2*np.pi, 2*np.pi, 2*np.pi, 2*np.pi])
+            'lower': np.array([-2.6179, 0, -2.967, -1.745, -1.22, -2.09439]),
+            'upper': np.array([2.6179, 3.14, 0, 1.745, 1.22, 2.09439])
         }
         
         self.reset_joint_pos = reset_joint_pos
