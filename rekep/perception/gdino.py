@@ -1,48 +1,39 @@
-from dds_cloudapi_sdk import Config, Client, DetectionTask, TextPrompt, DetectionModel, DetectionTarget
-from dds_cloudapi_sdk.tasks.dinox import DinoxTask
+from dds_cloudapi_sdk import Config, Client
+from dds_cloudapi_sdk.tasks.v2_task import V2Task
 
 import os
 import numpy as np
 import cv2
 import supervision as sv
+from rekep.perception.rle_util import rle_to_array
 
 API_TOKEN = os.getenv("DDS_CLOUDAPI_TEST_TOKEN")
-MODEL = "GDino1_5_Pro"
-DETECTION_TARGETS = ["Mask", "BBox"]
 
 class GroundingDINO:
     def __init__(self):
         config = Config(API_TOKEN)
         self.client = Client(config)
-
-    def detect_objects(self, image_path, input_prompts):
-        image_url = self.client.upload_file(image_path)
-        task = DetectionTask(
-            image_url=image_url,
-            prompts=[TextPrompt(text=pt) for pt in input_prompts],
-            targets=[getattr(DetectionTarget, target) for target in DETECTION_TARGETS],
-            model=getattr(DetectionModel, MODEL),
-        )
-        self.client.run_task(task)
-        return task.result
     
-    def get_dinox(self, image_path, input_prompts):
-        TEXT_PROMPT = "<prompt_free>" # TODO: fix as prompt-free mode here
+    def get_dinox(self, image_path):
         image_url = self.client.upload_file(image_path)
-        task = DinoxTask(
-            image_url=image_url,
-            prompts=[TextPrompt(text=TEXT_PROMPT)],
-            # prompts=[TextPrompt(text=input_prompts)],
-            bbox_threshold=0.25,
-            targets=[DetectionTarget.BBox, DetectionTarget.Mask]
-        )
+        task = V2Task(api_path="/v2/task/dinox/detection", 
+        api_body={
+        "model": "DINO-X-1.0",
+        "image": image_url,
+        "prompt": {
+            "type":"universal",
+        },
+        "targets": ["bbox", "mask"], 
+        "bbox_threshold": 0.25,
+        "iou_threshold": 0.8
+        })
         self.client.run_task(task)
-        predictions = task.result.objects
+        predictions = task.result["objects"]
         return predictions
     
     def visualize_bbox_and_mask(self, predictions, img_path, output_dir):
         # decode the prediction results
-        classes = [pred.category for pred in predictions]
+        classes = [pred["category"] for pred in predictions]
         classes = list(set(classes))
         class_name_to_id = {name: id for id, name in enumerate(classes)}
         class_id_to_name = {id: name for name, id in class_name_to_id.items()}
@@ -54,10 +45,10 @@ class GroundingDINO:
         class_ids = []
 
         for idx, obj in enumerate(predictions):
-            boxes.append(obj.bbox)
-            masks.append(DetectionTask.rle2mask(DetectionTask.string2rle(obj.mask.counts), obj.mask.size))  # convert mask to np.array using DDS API
-            confidences.append(obj.score)
-            cls_name = obj.category.lower().strip()
+            boxes.append(obj["bbox"])
+            masks.append(rle_to_array(obj["mask"]["counts"], obj["mask"]["size"][0] * obj["mask"]["size"][1]).reshape(obj["mask"]["size"]))
+            confidences.append(obj["score"])
+            cls_name = obj["category"].lower().strip()
             class_names.append(cls_name)
             class_ids.append(class_name_to_id[cls_name])
 
@@ -93,14 +84,4 @@ class GroundingDINO:
         print(f"\033[92mDebug: # Boxes: {len(boxes)}\033[0m")
         return boxes, masks
 
-
-    def rle2rgba(self, rle_mask):
-        # Create a dummy task with minimal required arguments
-        dummy_task = DetectionTask(
-            image_url="dummy",
-            prompts=[TextPrompt(text="dummy")],
-            targets=[DetectionTarget.Mask],
-            model=getattr(DetectionModel, MODEL)
-        )
-        return dummy_task.rle2rgba(rle_mask)
     

@@ -1,5 +1,4 @@
-
-from piper_controller import PiperController
+from env.piper_controller import PiperController
 import time
 
 class RobotEnv:

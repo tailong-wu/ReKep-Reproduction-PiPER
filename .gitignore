@@ -1,2 +1,3 @@
 .vscode/
 test_files/
+__pycache__/
