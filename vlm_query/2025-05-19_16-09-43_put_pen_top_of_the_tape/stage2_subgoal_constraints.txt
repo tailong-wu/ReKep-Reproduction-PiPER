@@ -1,0 +1,9 @@
+def stage2_subgoal_constraint1(end_effector, keypoints):
+    """Ensure the pen is directly above the tape's keypoint at a specific distance."""
+    tape_keypoint = keypoints[2]
+    pen_position = keypoints[6]  # Assume pen is being manipulated
+    offset = np.array([0, 0, 0.1])  # Position pen 10cm above tape
+    offsetted_point = tape_keypoint + offset
+    cost = np.linalg.norm(pen_position - offsetted_point)
+    return cost
+

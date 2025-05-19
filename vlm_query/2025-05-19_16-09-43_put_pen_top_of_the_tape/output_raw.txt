@@ -1,0 +1,43 @@
+```python
+# The task "put pen top of the tape" involves:
+# - Stage 1: "grasp pen". This involves aligning the end-effector with the keypoint associated with the pen (keypoint 6).
+# - Stage 2: "drop pen on top of tape". This involves positioning the pen above the tape area (defined by keypoint 2 or close to it).
+
+num_stages = 2
+
+### Stage 1: Sub-goal constraints for "grasp pen"
+def stage1_subgoal_constraint1(end_effector, keypoints):
+    """Ensure the end-effector is aligned with the pen's keypoint."""
+    pen_keypoint = keypoints[6]
+    cost = np.linalg.norm(end_effector - pen_keypoint)
+    return cost
+### Stage 1: Path constraints (not needed)
+
+### Stage 2: Sub-goal constraints for "drop pen on top of tape"
+def stage2_subgoal_constraint1(end_effector, keypoints):
+    """Ensure the pen is directly above the tape's keypoint at a specific distance."""
+    tape_keypoint = keypoints[2]
+    pen_position = keypoints[6]  # Assume pen is being manipulated
+    offset = np.array([0, 0, 0.1])  # Position pen 10cm above tape
+    offsetted_point = tape_keypoint + offset
+    cost = np.linalg.norm(pen_position - offsetted_point)
+    return cost
+
+### Stage 2: Path constraints
+def stage2_path_constraint1(end_effector, keypoints):
+    """Ensure the robot is still grasping the pen during the movement."""
+    return get_grasping_cost_by_keypoint_idx(6)
+
+"""
+Summarize keypoints to be grasped in all grasping stages.
+For grasping stage, write the keypoint index. For non-grasping stage, write -1.
+"""
+grasp_keypoints = [6, -1]
+
+"""
+Summarize at **the end of which stage** the robot should release the keypoints.
+The keypoint indices must appear in an earlier stage as defined in `grasp_keypoints`.
+Only release objects when it's necessary to complete the task.
+"""
+release_keypoints = [-1, 6]
+```
