@@ -2,12 +2,12 @@ from env.piper_controller import PiperController
 import time
 
 class RobotEnv:
-    def __init__(self, interface: str = "can0"):
+    def __init__(self, interface: str = "can0",test_mode: bool = False):
         # 初始化真实机械臂环境   
         self.interface = interface
 
         # 初始化机械臂
-        self.robot = PiperController(self.interface)
+        self.robot = PiperController(self.interface, test_mode)
         
     def execute_action(self, action, precise=False, speed=0.05, acceleration=0.05):
         """

@@ -4,14 +4,19 @@ import asyncio
 from typing import List
 import time
 from piper_sdk import C_PiperInterface_V2
+from env.piper_mock_interface import Mock_C_PiperInterface_V2
 
 class PiperController:
-    def __init__(self, interface: str = "can0"):
+    def __init__(self, interface: str = "can0", test_mode: bool = False):
         """
         初始化 PiperController 类并连接到机械臂接口
         :param interface: CAN 接口名称 (默认 "can0")
+        :param test_mode: 是否启用测试模式（使用 Mock）
         """
-        self.piper = C_PiperInterface_V2(interface)
+        if test_mode:
+            self.piper = Mock_C_PiperInterface_V2(interface)
+        else:
+            self.piper = C_PiperInterface_V2(interface)
         self.piper.ConnectPort()  # 连接到机械臂接口
         self.piper.EnableArm(7)  # 使能机械臂
 

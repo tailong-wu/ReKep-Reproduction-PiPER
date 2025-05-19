@@ -1,0 +1,72 @@
+{
+    "rekep_state": 0,
+    "joint_info": {
+        "joint_positions": [
+        0.00, 
+        0.00,
+        0.00,
+        0.00,
+        0.00,
+        0.00],
+        "reset_joint_pos": [
+        0.00, 
+        0.00,
+        0.00,
+        0.00,
+        0.00,
+        0.00]
+    },
+    "ee_info": {
+        # TODO - set real position and orientation
+        "position": [
+            -0.32465864654484333,
+            -0.0353881443049846,
+            0.4739086392504368
+        ],
+        "orientation": [
+            0.00011895923596397114,
+            -3.1415032144007338,
+            -2.3642715323766294e-06
+        ]
+    },
+    "gripper_info": {
+        "state": 0.0
+    },
+    "safety_info": {
+        "collision_status": "false",
+        "safety_status": "normal",
+        "errors": []
+    },
+    "control_info": {
+        "control_mode": "position",
+        "operation_mode": "auto"
+    },
+    "misc": {
+        "world2robot_homo": [
+            [
+                0.71659986,
+                -0.6894734,
+                0.10540908,
+                0.29309614
+            ],
+            [
+                -0.66892568,
+                -0.72216724,
+                -0.17610487,
+                0.49516889
+            ],
+            [
+                0.19754261,
+                0.05568588,
+                -0.9787114,
+                0.42916608
+            ],
+            [
+                0.0,
+                0.0,
+                0.0,
+                1.0
+            ]
+        ]
+    }
+}

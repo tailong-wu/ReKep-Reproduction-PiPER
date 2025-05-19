@@ -73,12 +73,12 @@ class MainR2D2:
         np.random.seed(self.config['seed'])
         torch.manual_seed(self.config['seed'])
         torch.cuda.manual_seed(self.config['seed'])
-        # Update the default reset_joint_pos for UR5
+        # TODO Update the default reset_joint_pos for PIPER
         self.reset_joint_pos = np.array([-0.023413960133687794, -1.9976251761065882, 1.7851085662841797, 4.942904949188232, -1.5486105124102991, -1.5801880995379847])  # UR5 home position
 
         # self.vision = R2D2Vision(visualize=self.visualize)
 
-        self.robot_env = RobotEnv()
+        self.robot_env = RobotEnv(test_mode=True)
         self.env = R2D2Env(global_config['env'])
         
         ik_solver = PiPERIKSolver(
@@ -92,7 +92,7 @@ class MainR2D2:
 
         if visualize:
             self.visualizer = Visualizer(global_config['visualizer'])
-            self.data_path = "/home/franka/R2D2_3dhat/images/current_images"
+            self.data_path = "/home/franka/R2D2_3dhat/images/current_images" # TODO ???
 
     @timer_decorator
     def perform_task(self, instruction, obj_list=None, rekep_program_dir=None):
@@ -423,7 +423,7 @@ class MainR2D2:
             [0, 0, 1],  # New x-axis is old z-axis
             [-1, 0, 0], # New y-axis is old x-axis
             [0, -1, 0]  # New z-axis is negative old y-axis
-    ])
+        ])
 
         # Apply the correction to the camera frame rotation part
         camera_frame = camera_frame_incorrect.copy()
