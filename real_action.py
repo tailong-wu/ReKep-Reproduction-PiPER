@@ -460,7 +460,7 @@ class MainR2D2:
         return intrinsics_matrix, depth_scale
 
     def load_camera_extrinsics(self):
-        extrinsics_path = '/home/xu/.ros/easy_handeye/easy_handeye_eye_on_hand.yaml'
+        extrinsics_path = './configs/camera.yaml' 
         with open(extrinsics_path, 'r') as f:
             extrinsics_data = yaml.safe_load(f)
         
