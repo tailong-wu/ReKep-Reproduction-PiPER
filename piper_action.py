@@ -7,7 +7,7 @@ import pdb
 from scipy.spatial.transform import Rotation as R
 import yaml
 # TODO 确认piper是否需要这个rotations部分 
-# from ur_env.rotations import pose2quat, quat_2_rotvec
+from env.rotations import pose2quat, quat_2_rotvec
 
 import argparse
 from rekep.environment import R2D2Env
@@ -352,7 +352,7 @@ class MainR2D2:
     def _execute_release_action(self):
         print("Release action")
         
-    def transform_keypoints_to_world(self, keypoints):
+    def transform_keypoints_to_world_c2e2b(self, keypoints):
         """
         将关键点从相机坐标系转换到机器人基坐标系
         分两步转换：
@@ -411,15 +411,34 @@ class MainR2D2:
         base_coords = base_coords_homogeneous[:, :3] / base_coords_homogeneous[:, 3, np.newaxis]
         
         return base_coords
+    def transform_keypoints_to_world(self, keypoints):
+        """
+        将关键点从相机坐标系直接转换到机器人基坐标系（使用 Eye-to-Hand 标定结果）
+        """
+        keypoints = np.array(keypoints)
+        
+        # 关键点转换为齐次形式
+        keypoints_homogeneous = np.hstack((keypoints, np.ones((keypoints.shape[0], 1))))
+        
+        # 直接加载相机外参矩阵：相机 → base
+        camera2base = self.load_camera_extrinsics()  # shape: (4, 4)
+
+        # 应用变换
+        base_coords_homogeneous = (camera2base @ keypoints_homogeneous.T).T
+
+        # 转换为非齐次坐标
+        base_coords = base_coords_homogeneous[:, :3] / base_coords_homogeneous[:, 3, np.newaxis]
+        
+        return base_coords
 
     def load_camera_intrinsics(self):
         # D435i default intrinsics
         class RS_Intrinsics:
             def __init__(self):
-                self.fx = 391.44  # focal length x
-                self.fy = 391.44  # focal length y
-                self.ppx = 327.62  # principal point x
-                self.ppy = 241.29  # principal point y
+                self.fx = 489.424683  # focal length x
+                self.fy = 489.424683 # focal length y
+                self.ppx = 325.761810 # principal point x
+                self.ppy = 212.508759  # principal point y
         
         intrinsics = RS_Intrinsics()
         depth_scale = 0.001  # D435i default depth scale, 1mm
@@ -439,10 +458,10 @@ class MainR2D2:
             extrinsics_data = yaml.safe_load(f)
         
         # Extract transformation parameters
-        qw = extrinsics_data['transformation']['qw']
         qx = extrinsics_data['transformation']['qx']
         qy = extrinsics_data['transformation']['qy']
         qz = extrinsics_data['transformation']['qz']
+        qw = extrinsics_data['transformation']['qw']
         tx = extrinsics_data['transformation']['x']
         ty = extrinsics_data['transformation']['y']
         tz = extrinsics_data['transformation']['z']

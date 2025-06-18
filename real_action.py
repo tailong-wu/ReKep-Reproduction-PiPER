@@ -30,22 +30,6 @@ from rekep.utils import (
 )
 
 # from r2d2_vision import R2D2Vision
-'''
-metadata.json
-{
-    "init_keypoint_positions": [
-        [-0.1457058783982955, -0.47766187961876, 0.98],
-        [-0.0144477656708159, 0.012521396914707113, 0.745],
-        [0.14099338570298237, 0.5722672713826932, 1.283],
-        [0.2693722882157947, -0.3018593983523729, 1.047],
-        [0.43524427390119413, -0.04595746991503292, 0.6970000000000001]
-    ],
-    "num_keypoints": 5,
-    "num_stages": 4,
-    "grasp_keypoints": [1, -1, 2, -1],
-    "release_keypoints": [-1, 1, -1, 2]
-}
-'''
 import warnings
 warnings.filterwarnings("ignore", category=UserWarning)
 warnings.filterwarnings("ignore", message="xFormers is not available")
@@ -378,7 +362,7 @@ class MainR2D2:
     def _execute_release_action(self):
         print("Release action")
         
-    def transform_keypoints_to_world(self, keypoints):
+    def transform_keypoints_to_world_c2e2b(self, keypoints):
         """
         将关键点从相机坐标系转换到机器人基坐标系
         分两步转换：
@@ -423,7 +407,7 @@ class MainR2D2:
             [0, 0, 1],  # New x-axis is old z-axis
             [-1, 0, 0], # New y-axis is old x-axis
             [0, -1, 0]  # New z-axis is negative old y-axis
-        ])
+    ])
 
         # Apply the correction to the camera frame rotation part
         camera_frame = camera_frame_incorrect.copy()
@@ -437,16 +421,47 @@ class MainR2D2:
         base_coords = base_coords_homogeneous[:, :3] / base_coords_homogeneous[:, 3, np.newaxis]
         
         return base_coords
+    def transform_keypoints_to_world(self, keypoints):
+        """
+        将关键点从相机坐标系转换到机器人基座坐标系
+        使用 Eye-to-Hand 标定结果 + 坐标轴对齐修正
+
+        PiPer机械臂基座坐标系：
+            X 向前，Y 向左，Z 向上
+        RealSense光学坐标系：
+            X 向右，Y 向下，Z 向前
+        """
+        keypoints = np.array(keypoints)
+        keypoints_homogeneous = np.hstack((keypoints, np.ones((keypoints.shape[0], 1))))
+
+        # # 加载 base → camera 的外参矩阵
+        T_camera_to_base = self.load_camera_extrinsics()
+     
+        # position = np.array([0.29309614, 0.49516889, 0.42916608])
+        # quaternion = np.array([0.06269216, 0.92432117, -0.36740451, 0.08193897])  # [x, y, z, w]
+
+        # # Convert quaternion to rotation matrix
+        # rotation_matrix = R.from_quat(quaternion).as_matrix()
+
+        # # Create a 4x4 homogeneous transformation matrix
+        # T_camera_to_base = np.eye(4)
+        # T_camera_to_base[:3, :3] = rotation_matrix
+        # T_camera_to_base[:3, 3] = position
+
+        # 应用变换
+        base_coords_homogeneous = (T_camera_to_base @ keypoints_homogeneous.T).T
+        base_coords = base_coords_homogeneous[:, :3] / base_coords_homogeneous[:, 3, np.newaxis]
+
+        return base_coords
 
     def load_camera_intrinsics(self):
         # D435i default intrinsics
         class RS_Intrinsics:
             def __init__(self):
-                self.fx = 391.44  # focal length x
-                self.fy = 391.44  # focal length y
-                self.ppx = 327.62  # principal point x
-                self.ppy = 241.29  # principal point y
-        
+                self.fx = 489.424683  # focal length x
+                self.fy = 489.424683 # focal length y
+                self.ppx = 325.761810 # principal point x
+                self.ppy = 212.508759  # principal point y
         intrinsics = RS_Intrinsics()
         depth_scale = 0.001  # D435i default depth scale, 1mm
         
@@ -463,12 +478,10 @@ class MainR2D2:
         extrinsics_path = './configs/camera.yaml' 
         with open(extrinsics_path, 'r') as f:
             extrinsics_data = yaml.safe_load(f)
-        
-        # 修正四元数顺序：YAML文件中存储的是[w,x,y,z]
-        qw = extrinsics_data['transformation']['qw']
         qx = extrinsics_data['transformation']['qx']
         qy = extrinsics_data['transformation']['qy'] 
         qz = extrinsics_data['transformation']['qz']
+        qw = extrinsics_data['transformation']['qw']
         
         # 转换为Scipy需要的[x,y,z,w]格式
         rot = R.from_quat([qx, qy, qz, qw]).as_matrix()

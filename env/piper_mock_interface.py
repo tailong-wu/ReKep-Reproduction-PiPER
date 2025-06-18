@@ -10,7 +10,7 @@ class Mock_C_PiperInterface_V2:
         self.interface = interface
         print(f"[Mock] 初始化 Piper 接口：{interface}")
         self.arm_enabled = False
-        self.current_pose = [0, 0, 0, 0, 0, 0]  # mm or 0.001mm 单位
+        self.current_pose = [0.054957, 0., 0.260009, 0, 0.084958, 0]  # m单位 但是piper是mm or 0.001mm 单位
         self.joint_positions = [0, 0, 0, 0, 0, 0]
         self.gripper_angle = 0
         self.gripper_force = 0

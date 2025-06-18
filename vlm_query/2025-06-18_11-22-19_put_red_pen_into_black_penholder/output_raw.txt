@@ -1,0 +1,54 @@
+```python
+
+# The task "put red pen into black penholder" involves 3 stages:
+# 1. Grasp the red pen by aligning the end-effector with its keypoint.
+# 2. Align the red pen with the penholder opening. This involves positioning the pen 10 cm above the penholder opening while keeping the robot grasping the red pen.
+# 3. Drop the red pen into the penholder by releasing the red pen keypoint. The pen must be directly aligned with the penholder opening before release.
+
+num_stages = 3
+
+### stage 1 sub-goal constraints (grasp red pen)
+def stage1_subgoal_constraint1(end_effector, keypoints):
+    """Ensure the end-effector is aligned with the red pen (keypoint 3)."""
+    cost = np.linalg.norm(end_effector - keypoints[3])
+    return cost
+
+### stage 1 path constraints (none required)
+
+### stage 2 sub-goal constraints (align red pen with the penholder opening)
+def stage2_subgoal_constraint1(end_effector, keypoints):
+    """Ensure the red pen (keypoint 3) is 10 cm above the penholder opening (keypoint 0)."""
+    offsetted_point = keypoints[0] + np.array([0, 0, 0.1])  # Add 10 cm along z-axis to the penholder opening
+    cost = np.linalg.norm(keypoints[3] - offsetted_point)
+    return cost
+
+### stage 2 path constraints
+def stage2_path_constraint1(end_effector, keypoints):
+    """Ensure the robot is still grasping the red pen (keypoint 3)."""
+    return get_grasping_cost_by_keypoint_idx(3)
+
+### stage 3 sub-goal constraints (drop the red pen into the penholder)
+def stage3_subgoal_constraint1(end_effector, keypoints):
+    """Ensure the red pen (keypoint 3) is directly aligned with the penholder opening (keypoint 0) before releasing."""
+    cost = np.linalg.norm(keypoints[3] - keypoints[0])
+    return cost
+
+### stage 3 path constraints
+def stage3_path_constraint1(end_effector, keypoints):
+    """Ensure the robot is still grasping the red pen (keypoint 3) while aligning."""
+    return get_grasping_cost_by_keypoint_idx(3)
+
+"""
+Summarize keypoints to be grasped in all grasping stages.
+Stage 1 involves grasping the red pen (keypoint 3), so the value for stage 1 is 3.
+Stages 2 and 3 do not involve grasping new keypoints, so the value for these stages is -1.
+"""
+grasp_keypoints = [3, -1, -1]
+
+"""
+Summarize at **the end of which stage** the robot should release the keypoints.
+The red pen (keypoint 3) is released at the end of stage 3 to complete the task, so the value for stage 3 is 3.
+In stages 1 and 2, no keypoints are released, so the values for these stages are -1.
+"""
+release_keypoints = [-1, -1, 3]
+```
