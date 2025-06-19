@@ -17,8 +17,8 @@ sudo apt update && sudo apt install can-utils ethtool
 
 ## 进展
 - [x] 实现PiPER控制器
-- [ ] 
-- [ ] 
+- [ ] 实机测试PiPER控制器
+- [ ] 增加点跟踪部分[cotracker-rekep-api](https://github.com/tailong-wu/cotracker-rekep-api)
 
 
 ## 文件说明
@@ -29,4 +29,5 @@ sudo apt update && sudo apt install can-utils ethtool
 
 ## 参考代码仓库
 https://github.com/heyjiacheng/Rekep-ur5/tree/main
+
 https://github.com/agilexrobotics/piper_sdk/tree/master
