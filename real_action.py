@@ -272,20 +272,20 @@ class MainR2D2:
         # 从四元数创建旋转矩阵
         rotation_matrix = R.from_quat(quat).as_matrix()
         
-        # 应用手性校正
-        rot_correct = np.array([
-            [-1, 0, 0],
-            [0, -1, 0],
-            [0, 0, 1]
-        ])
-        rotation_corrected = rotation_matrix @ rot_correct
+        # # 应用手性校正
+        # rot_correct = np.array([
+        #     [-1, 0, 0],
+        #     [0, -1, 0],
+        #     [0, 0, 1]
+        # ])
+        # rotation_corrected = rotation_matrix @ rot_correct
         
-        # 计算沿校正后EE z轴的偏移
-        z_offset = np.array([0, 0, 0.16])  # z轴方向0.16m
-        z_offset_world = rotation_corrected @ z_offset
+        # # 计算沿校正后EE z轴的偏移
+        # z_offset = np.array([0, 0, 0.16])  # z轴方向0.16m
+        # z_offset_world = rotation_corrected @ z_offset
         
-        # 从位置中减去偏移量
-        subgoal_pose[:3] = position - z_offset_world
+        # # 从位置中减去偏移量
+        # subgoal_pose[:3] = position - z_offset_world
             
         debug_dict['stage'] = self.stage
         print_opt_debug_dict(debug_dict)

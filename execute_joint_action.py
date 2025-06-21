@@ -37,11 +37,15 @@ def enable_fun(piper: C_PiperInterface_V2):
         print("程序自动使能超时,退出程序")
         exit(0)
 
-def wait_for_joints(piper: C_PiperInterface_V2, target_joints_rad, joints_mdeg, tolerance=0.1):
+def wait_for_joints(piper: C_PiperInterface_V2, target_joints_rad, joints_mdeg, gripper_val,tolerance=0.1):
     """等待机械臂到达指定关节角度, 期间会持续发送目标指令"""
     # factor to convert from 0.001 degrees (from robot) to radians
     factor_to_rad = np.pi / (180 * 1000)
     while True:
+        if gripper_val == 0:
+            piper.GripperCtrl(50*1000, 1000, 0x01, 0)  # 张开 50mm
+        else:
+            piper.GripperCtrl(0*1000, 1000, 0x01, 0)  # 闭合
         piper.JointCtrl(joints_mdeg[0], joints_mdeg[1], joints_mdeg[2], joints_mdeg[3], joints_mdeg[4], joints_mdeg[5])
         
         joint_msgs = piper.GetArmJointMsgs()
@@ -89,14 +93,10 @@ if __name__ == "__main__":
         joints_mdeg = [round(angle * joint_factor) for angle in joint_angles_rad]
         print(f"发送给控制器的关节角度: {joints_mdeg}")
 
-        gripper_val = action[6]
-        if gripper_val == 0:
-            piper.GripperCtrl(0, 1000, 0x01, 0)  # 张开
-        else:
-            piper.GripperCtrl(1000, 1000, 0x01, 0)  # 闭合
+        gripper_val = 0
 
         print("等待机械臂到达目标关节角度...")
-        wait_for_joints(piper, joint_angles_rad, joints_mdeg)
+        wait_for_joints(piper, joint_angles_rad, joints_mdeg,gripper_val)
 
         input("按 Enter键 继续下一个动作...")
 
