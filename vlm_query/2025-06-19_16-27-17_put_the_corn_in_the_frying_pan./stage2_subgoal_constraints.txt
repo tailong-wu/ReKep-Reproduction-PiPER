@@ -1,0 +1,7 @@
+def stage2_subgoal_constraint1(end_effector, keypoints):
+    """Ensure the corn (keypoint 3) is placed at the center of the frying pan (keypoint 4)."""
+    keypoint_corn = keypoints[3]  # Keypoint associated with the corn
+    keypoint_pan = keypoints[4]  # Keypoint associated with the frying pan
+    cost = np.linalg.norm(keypoint_corn - keypoint_pan)
+    return cost
+

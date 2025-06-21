@@ -1,0 +1,6 @@
+def stage1_subgoal_constraint1(end_effector, keypoints):
+    """Ensure the end-effector is aligned with the corn (keypoint 3)."""
+    keypoint_corn = keypoints[3]  # Keypoint associated with the corn
+    cost = np.linalg.norm(end_effector - keypoint_corn)
+    return cost
+

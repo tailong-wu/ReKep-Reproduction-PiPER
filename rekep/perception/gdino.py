@@ -1,5 +1,5 @@
 from dds_cloudapi_sdk import Config, Client
-from dds_cloudapi_sdk.tasks.v2_task import V2Task
+from dds_cloudapi_sdk.tasks.v2_task import V2Task, create_task_with_local_image_auto_resize
 
 import os
 import numpy as np
@@ -15,18 +15,24 @@ class GroundingDINO:
         self.client = Client(config)
     
     def get_dinox(self, image_path):
-        image_url = self.client.upload_file(image_path)
-        task = V2Task(api_path="/v2/task/dinox/detection", 
-        api_body={
-        "model": "DINO-X-1.0",
-        "image": image_url,
-        "prompt": {
-            "type":"universal",
-        },
-        "targets": ["bbox", "mask"], 
-        "bbox_threshold": 0.25,
-        "iou_threshold": 0.8
-        })
+        text_prompt = ""
+        api_path = "/v2/task/dinox/detection"
+        api_body_without_image = {
+            "model": "DINO-X-1.0",
+            "prompt": {
+                "type": "universal",
+                "text": text_prompt
+            },
+            "targets": ["bbox", "mask"],
+            "bbox_threshold": 0.35,
+            "iou_threshold": 0.8
+        }
+
+        task = create_task_with_local_image_auto_resize(
+            api_path=api_path,
+            api_body_without_image=api_body_without_image,
+            image_path=image_path,
+        )
         self.client.run_task(task)
         predictions = task.result["objects"]
         return predictions

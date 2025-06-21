@@ -1,0 +1,4 @@
+def stage2_path_constraint1(end_effector, keypoints):
+    """Ensure the robot is still grasping the corn (keypoint 3) throughout this stage."""
+    return get_grasping_cost_by_keypoint_idx(3)
+

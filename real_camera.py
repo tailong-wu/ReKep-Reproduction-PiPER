@@ -19,19 +19,10 @@ os.makedirs(save_dir, exist_ok=True)
 pipeline = rs.pipeline()
 config = rs.config()
 
-# 指定要使用的相机序列号
-# target_serial = "819612070593"
-target_serial = "134722070309000000K38179-110"
-config.enable_device(target_serial)
-
 # Get device product line for setting a supporting resolution
 pipeline_wrapper = rs.pipeline_wrapper(pipeline)
 pipeline_profile = config.resolve(pipeline_wrapper)
 device = pipeline_profile.get_device()
-serial_number = device.get_info(rs.camera_info.serial_number)
-print(f"相机序列号: {serial_number}")
-
-    
 device_product_line = str(device.get_info(rs.camera_info.product_line))
 
 found_rgb = False
