@@ -3,7 +3,7 @@ import pyrealsense2 as rs
 
 def initialize_realsense():
     # Load camera config
-    with open('./configs/camera.yaml', 'r') as f:
+    with open('./configs/camera_config.yaml', 'r') as f:
         config = yaml.safe_load(f)['realsense']
     
     # Initialize pipeline
@@ -43,6 +43,19 @@ def load_camera_intrinsics(self):
     # config.enable_stream(rs.stream.color, 640, 480, rs.format.bgr8, 30)
 
     pipeline, config = initialize_realsense() # perception module
+    
+    # 硬件重置相机以解决 "Frame didn't arrive within 5000" 错误
+    print("正在重置相机硬件...")
+    ctx = rs.context()
+    devices = ctx.query_devices()
+    for dev in devices:
+        dev.hardware_reset()
+    print("相机硬件重置完成")
+    
+    # 等待一段时间让设备重新初始化
+    import time
+    time.sleep(2)
+    
     profile = pipeline.start(config)
 
     depth_sensor = profile.get_device().first_depth_sensor()

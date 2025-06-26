@@ -25,6 +25,7 @@ sudo apt update && sudo apt install can-utils ethtool
 + [real_camera.py](./real_camera.py): 获取realsense相机出厂默认内参，并拍摄图像
 
 
+metadata.json 中保存的是初始关键点三维位置（相机坐标）[x,y,z]（注意：基于realsense光学坐标系）、初始关键点二维图像位置[y,x]（与 OpenCV 的像素坐标约定一致。）、以及其他必要信息。
 
 
 ## 参考代码仓库

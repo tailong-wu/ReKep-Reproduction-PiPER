@@ -1,0 +1,42 @@
+# Camera configuration for ReKep system
+
+# Camera resolution settings
+resolution:
+  width: 640
+  height: 480
+  fps: 30
+
+# Camera intrinsics for D435i
+intrinsics:
+  fx: 489.424683
+  fy: 489.424683
+  ppx: 325.761810
+  ppy: 212.508759
+  depth_scale: 0.001  # 1mm
+
+# Image processing settings
+processing:
+  resize_width: 640
+  resize_height: 480
+
+# Camera extrinsics (from camera.yaml)
+rpy:
+  pitch: 0.06588231088117635
+  roll: -2.1650111356546553
+  yaw: 2.538729563891562
+transformation:
+  qw: 0.11142461354105777
+  qx: -0.2768036418424137
+  qy: -0.8382729947453993
+  qz: 0.4563580673556482
+  x: 0.4424036921820015
+  y: 0.46022179096876425
+  z: 0.3483587853923549
+
+# RealSense camera configuration
+realsense:
+  serial_number: ""  # 留空使用第一个找到的D435i
+  resolution:
+    width: 640
+    height: 480
+  fps: 30

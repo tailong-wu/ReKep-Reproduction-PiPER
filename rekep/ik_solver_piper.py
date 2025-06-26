@@ -117,7 +117,7 @@ class PiPERIKSolver:
 # Unit tests
 def test_piper_ik():
     # Create solver
-    reset_joint_pos=np.array([-0.023413960133687794, -1.9976251761065882, 1.7851085662841797, 4.942904949188232, -1.5486105124102991, -1.5801880995379847])
+    reset_joint_pos=np.array([-86.853, -1.560, -0.762, 2.939, 22.294, 0.000]) * np.pi / (180 * 1000)  # PiPER home position (converted from 0.001 degrees to radians)
 
     solver = PiPERIKSolver(reset_joint_pos)
     

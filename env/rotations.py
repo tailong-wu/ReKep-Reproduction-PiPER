@@ -23,11 +23,11 @@ def quat_2_mrp(quat):
 
 # convert euler angle into quaternions 
 def euler_2_quat(euler):
-    return R.from_euler(euler).as_quat()
+    return R.from_euler('xyz', euler).as_quat()
 
-# convert pose into quaternions, pose is [x,y,z,rx,ry,rz], pose is [x,y,z,qw,qx,qy,qz]
-def pose2quat(rotvec_pose) -> np.ndarray:
-    return np.concatenate((rotvec_pose[:3], rotvec_2_quat(rotvec_pose[3:])))
+# convert pose into quaternions, pose is [x,y,z,rx,ry,rz] (euler angles), returns [x,y,z,qx,qy,qz,qw]
+def pose2quat(euler_pose) -> np.ndarray:
+    return np.concatenate((euler_pose[:3], euler_2_quat(euler_pose[3:])))
 
 # convert pose into quaternions
 def pose2rotvec(quat_pose) -> np.ndarray:

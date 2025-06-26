@@ -12,13 +12,12 @@ from env.rotations import pose2quat
 import argparse
 
 from rekep.environment import R2D2Env
-# from rekep.ik_solver_ur5 import UR5IKSolver
 from rekep.ik_solver_piper import PiPERIKSolver
 from rekep.subgoal_solver import SubgoalSolver
 from rekep.path_solver import PathSolver
 from rekep.visualizer import Visualizer
 # from ur_env.ur5_env import RobotEnv
-from env.piper_env import RobotEnv
+from rekep.environment_new import ReKepEnv
 from rekep.utils import (
     bcolors,
     get_config,
@@ -57,12 +56,12 @@ class MainR2D2:
         np.random.seed(self.config['seed'])
         torch.manual_seed(self.config['seed'])
         torch.cuda.manual_seed(self.config['seed'])
-        # TODO Update the default reset_joint_pos for PIPER
-        self.reset_joint_pos = np.array([-0.023413960133687794, -1.9976251761065882, 1.7851085662841797, 4.942904949188232, -1.5486105124102991, -1.5801880995379847])  # UR5 home position
+        # PiPER default reset joint position
+        self.reset_joint_pos = np.array([-86.853, -1.560, -0.762, 2.939, 22.294, 0.000]) * np.pi / (180 * 1000)  # PiPER home position (converted from 0.001 degrees to radians)
 
         # self.vision = R2D2Vision(visualize=self.visualize)
 
-        self.robot_env = RobotEnv(test_mode=True)
+        self.robot_env = ReKepEnv(test_mode=True)
         self.env = R2D2Env(global_config['env'])
         
         ik_solver = PiPERIKSolver(
@@ -117,7 +116,7 @@ class MainR2D2:
             # Read stage from robot state file
             with open('./robot_state.json', 'r') as f:
                 robot_state = json.load(f)
-                stage = robot_state.get('rekep_stage', 1)  # !!! @Tianyou Default to stage 1 if not found
+                stage = robot_state.get('rekep_stage', 1)  # Default to stage 1 if not found
             # store robot state in rekep_program_dir
             with open(os.path.join(rekep_program_dir, f'robot_state_{stage}.json'), 'w') as f:
                 json.dump(robot_state, f, indent=4)
@@ -224,8 +223,8 @@ class MainR2D2:
     def ur_get_ee_pose(self):
         ee_pos = self.robot_env.robot.get_tcp_pose()
         pos = pose2quat(ee_pos)
-        # Extract quaternion components in [qx, qy, qz, qw] order
-        quat = np.array([pos[4], pos[5], pos[6], pos[3]])  # Modified index order
+        # pose2quat returns [x,y,z,qx,qy,qz,qw], so quaternion is already in correct order
+        quat = pos[3:7]  # [qx, qy, qz, qw] - correct order
         return np.concatenate([pos[:3], quat])
 
     def _load_constraints(self, rekep_program_dir):
@@ -475,7 +474,7 @@ class MainR2D2:
         return intrinsics_matrix, depth_scale
 
     def load_camera_extrinsics(self):
-        extrinsics_path = './configs/camera.yaml' 
+        extrinsics_path = './configs/camera_config.yaml' 
         with open(extrinsics_path, 'r') as f:
             extrinsics_data = yaml.safe_load(f)
         qx = extrinsics_data['transformation']['qx']

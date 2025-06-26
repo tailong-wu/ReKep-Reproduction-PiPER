@@ -38,6 +38,18 @@ config.enable_stream(rs.stream.depth, 640, 480, rs.format.z16, 30)
 
 config.enable_stream(rs.stream.color, 640, 480, rs.format.bgr8, 30)
 
+# 硬件重置相机以解决 "Frame didn't arrive within 5000" 错误
+print("正在重置相机硬件...")
+ctx = rs.context()
+devices = ctx.query_devices()
+for dev in devices:
+    dev.hardware_reset()
+print("相机硬件重置完成")
+
+# 等待一段时间让设备重新初始化
+import time
+time.sleep(2)
+
 # Start streaming
 pipeline.start(config)
 

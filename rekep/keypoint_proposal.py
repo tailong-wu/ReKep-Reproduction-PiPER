@@ -92,6 +92,10 @@ class KeypointProposer:
         candidate_keypoints = candidate_keypoints[sort_idx]
         candidate_pixels = candidate_pixels[sort_idx]
         candidate_rigid_group_ids = candidate_rigid_group_ids[sort_idx]
+        
+        # Save candidate_pixels for later access
+        self._last_candidate_pixels = candidate_pixels.copy()
+        
         # project keypoints to image space
         projected = self._project_keypoints_to_img(rgb, candidate_pixels, candidate_rigid_group_ids, masks, features_flat)
         return candidate_keypoints, projected

@@ -174,9 +174,13 @@ class PathSolver:
         return opt_result
 
     def _center_collision_points_and_keypoints(self, ee_pose, collision_points, keypoints, keypoint_movable_mask):
-        ee_pose_homo = pose2mat([ee_pose[:3], euler2quat(ee_pose[3:])])
+        # ee_pose[3:] is now quaternion format [x,y,z,w], no conversion needed
+        ee_pose_homo = pose2mat([ee_pose[:3], ee_pose[3:]])
         centering_transform = np.linalg.inv(ee_pose_homo)
-        collision_points_centered = np.dot(collision_points, centering_transform[:3, :3].T) + centering_transform[:3, 3]
+        if collision_points is not None:
+            collision_points_centered = np.dot(collision_points, centering_transform[:3, :3].T) + centering_transform[:3, 3]
+        else:
+            collision_points_centered = None
         keypoints_centered = transform_keypoints(centering_transform, keypoints, keypoint_movable_mask)
         return collision_points_centered, keypoints_centered
 
@@ -259,7 +263,9 @@ class PathSolver:
         # ====================================
         # = other setup
         # ====================================
-        collision_points_centered, keypoints_centered = self._center_collision_points_and_keypoints(start_pose, collision_points, keypoints, keypoint_movable_mask)
+        # Use original start_pose with quaternion for centering (before euler conversion)
+        original_start_pose = np.concatenate([start_pose[:3], euler2quat(start_pose[3:])])
+        collision_points_centered, keypoints_centered = self._center_collision_points_and_keypoints(original_start_pose, collision_points, keypoints, keypoint_movable_mask)
         aux_args = (og_bounds,
                     start_pose,
                     end_pose,

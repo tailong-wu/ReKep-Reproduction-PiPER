@@ -77,7 +77,7 @@ if __name__ == "__main__":
     with open('./outputs/joint_action.json', 'r') as f:
         action_data = json.load(f)
 
-    joint_action_seq = action_data['joint_action_seq']
+    joint_action_seq = action_data['joint_angle_seq']
 
     # Conversion factor for JointCtrl: rad -> 0.001deg
     joint_factor = 180 * 1000 / np.pi
@@ -99,5 +99,5 @@ if __name__ == "__main__":
         wait_for_joints(piper, joint_angles_rad, joints_mdeg,gripper_val)
 
         input("按 Enter键 继续下一个动作...")
-
+    piper.GripperCtrl(30*1000, 1000, 0x01, 0)  # 张开 50mm
     print("所有动作执行完毕。")

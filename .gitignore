@@ -5,3 +5,5 @@ example_query/
 piper_sdk/
 Rekep-ur5/
 pyroki/
+test_outputs/
+vlm_query/

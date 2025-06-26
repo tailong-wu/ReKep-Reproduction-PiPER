@@ -175,7 +175,10 @@ class SubgoalSolver:
     
     def _center_collision_points_and_keypoints(self, ee_pose_homo, collision_points, keypoints, keypoint_movable_mask):
         centering_transform = np.linalg.inv(ee_pose_homo)
-        collision_points_centered = np.dot(collision_points, centering_transform[:3, :3].T) + centering_transform[:3, 3]
+        if collision_points is not None:
+            collision_points_centered = np.dot(collision_points, centering_transform[:3, :3].T) + centering_transform[:3, 3]
+        else:
+            collision_points_centered = None
         # Only transforms keypoints where movable_mask is True
         keypoints_centered = transform_keypoints(centering_transform, keypoints, keypoint_movable_mask)
         return collision_points_centered, keypoints_centered
