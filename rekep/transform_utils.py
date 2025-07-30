@@ -515,12 +515,14 @@ def euler2quat(euler):
     Raises:
         AssertionError: [Invalid input shape]
     """
-    return R.from_euler("xyz", euler).as_quat()
+    # Use ZYX order to match the correct conversion: [rz, ry, rx]
+    rx, ry, rz = euler
+    return R.from_euler("ZYX", [rz, ry, rx]).as_quat()
 
 
 def quat2euler(quat):
     """
-    Converts euler angles into quaternion form
+    Converts quaternion into euler angles form
 
     Args:
         quat (np.array): (x,y,z,w) float quaternion angles
@@ -531,7 +533,10 @@ def quat2euler(quat):
     Raises:
         AssertionError: [Invalid input shape]
     """
-    return R.from_quat(quat).as_euler("xyz")
+    # Use ZYX order to match the correct conversion: [rz, ry, rx]
+    euler_zyx = R.from_quat(quat).as_euler("ZYX")
+    # Return in [rx, ry, rz] order
+    return np.array([euler_zyx[2], euler_zyx[1], euler_zyx[0]])
 
 def pose_in_A_to_pose_in_B(pose_A, pose_A_in_B):
     """

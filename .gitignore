@@ -1,4 +1,5 @@
 .vscode/
+.vercel/
 test_files/
 __pycache__/
 example_query/
@@ -6,4 +7,11 @@ piper_sdk/
 Rekep-ur5/
 pyroki/
 test_outputs/
-vlm_query/
+visualization/
+v2c*
+result/
+go_to_reset_robot.py
+keypoint_annotator.html
+logs/
+captures/
+rekep_result/

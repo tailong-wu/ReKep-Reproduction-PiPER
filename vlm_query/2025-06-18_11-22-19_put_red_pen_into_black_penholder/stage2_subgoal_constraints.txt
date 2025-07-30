@@ -1,6 +1,0 @@
-def stage2_subgoal_constraint1(end_effector, keypoints):
-    """Ensure the red pen (keypoint 3) is 10 cm above the penholder opening (keypoint 0)."""
-    offsetted_point = keypoints[0] + np.array([0, 0, 0.1])  # Add 10 cm along z-axis to the penholder opening
-    cost = np.linalg.norm(keypoints[3] - offsetted_point)
-    return cost
-

@@ -174,6 +174,16 @@ def update_camera_config(config_file: str, extrinsic_matrix: np.ndarray, positio
             'roll': float(rpy[0]),
             'pitch': float(rpy[1]),
             'yaw': float(rpy[2])
+        },
+        # 添加 transformation 字段，这是代码实际使用的部分
+        'transformation': {
+            'qx': float(quaternion[0]),
+            'qy': float(quaternion[1]),
+            'qz': float(quaternion[2]),
+            'qw': float(quaternion[3]),
+            'x': float(position[0]),
+            'y': float(position[1]),
+            'z': float(position[2])
         }
     })
     
@@ -261,6 +271,15 @@ def print_extrinsic_matrix(extrinsic_matrix: np.ndarray, position: list, quatern
     print(f"Roll:  {np.degrees(rpy[0]):.3f}°")
     print(f"Pitch: {np.degrees(rpy[1]):.3f}°")
     print(f"Yaw:   {np.degrees(rpy[2]):.3f}°")
+    
+    print("\n=== transformation 字段 (实际被代码使用) ===")
+    print(f"qx: {quaternion[0]:.6f}")
+    print(f"qy: {quaternion[1]:.6f}")
+    print(f"qz: {quaternion[2]:.6f}")
+    print(f"qw: {quaternion[3]:.6f}")
+    print(f"x: {position[0]:.6f}")
+    print(f"y: {position[1]:.6f}")
+    print(f"z: {position[2]:.6f}")
 
 
 def main():
@@ -343,3 +362,4 @@ def main():
 
 if __name__ == '__main__':
     main()
+    # python convert_calibration_to_extrinsics.py result/2025-07-16_07-57-53_calibration.json -u -w -r robot_state.json

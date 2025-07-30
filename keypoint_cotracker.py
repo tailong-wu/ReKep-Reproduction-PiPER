@@ -47,8 +47,10 @@ class CoTrackerClient:
             return {
                 'resolution': {'width': 640, 'height': 480, 'fps': 30},
                 'intrinsics': {
-                    'fx': 489.424683, 'fy': 489.424683,
-                    'ppx': 325.761810, 'ppy': 212.508759,
+                    'color': {
+                        'fx': 606.60, 'fy': 605.47,
+                        'ppx': 323.69, 'ppy': 247.12
+                    },
                     'depth_scale': 0.001
                 },
                 'processing': {'resize_width': 640, 'resize_height': 480}
@@ -215,7 +217,7 @@ class CoTrackerClient:
             cv2.circle(img_with_keypoints, (x, y), radius, color, -1)
         return img_with_keypoints
     
-    def save_frame_with_keypoints(self, img, keypoints, output_path, depth_image=None):
+    def save_frame_with_keypoints(self, img, keypoints, output_path, depth_image=None, save_dir=None):
         """保存带有关键点的图像
         
         Args:
@@ -223,7 +225,17 @@ class CoTrackerClient:
             keypoints (numpy.ndarray): 关键点坐标
             output_path (str): 输出文件路径
             depth_image (numpy.ndarray): 深度图像（可选）
+            save_dir (str): 保存目录（可选），如果提供，将覆盖output_path中的目录部分
         """
+        # 如果提供了保存目录，则使用该目录和output_path的文件名部分
+        if save_dir is not None:
+            # 确保目录存在
+            os.makedirs(save_dir, exist_ok=True)
+            # 获取output_path的文件名部分
+            filename = os.path.basename(output_path)
+            # 组合新的输出路径
+            output_path = os.path.join(save_dir, filename)
+        
         img_with_keypoints = self.draw_keypoints(img, keypoints)
         cv2.imwrite(output_path, img_with_keypoints)
         
@@ -234,17 +246,73 @@ class CoTrackerClient:
         
         print(f'Frame saved to {output_path}')
     
-    def real_time_tracking(self, save_dir="./data/cotracker_captures", 
+    def convert_2d_to_3d(self, keypoints_2d, depth_image, intrinsics):
+        """将2D关键点转换为3D关键点
+        
+        Args:
+            keypoints_2d (numpy.ndarray): 2D关键点坐标 [[x1, y1], [x2, y2], ...]
+            depth_image (numpy.ndarray): 深度图像
+            intrinsics (dict): 相机内参，包含fx, fy, ppx, ppy等参数
+            
+        Returns:
+            numpy.ndarray: 3D关键点坐标 [[x1, y1, z1], [x2, y2, z2], ...]
+        """
+        keypoints_2d = np.array(keypoints_2d)
+        
+        # 提取内参参数
+        # 统一使用彩色相机内参
+        color_intrinsics = self.camera_config['intrinsics']['color']
+        fx = intrinsics.get('fx', color_intrinsics['fx'])
+        fy = intrinsics.get('fy', color_intrinsics['fy'])
+        cx = intrinsics.get('ppx', color_intrinsics['ppx'])
+        cy = intrinsics.get('ppy', color_intrinsics['ppy'])
+        depth_scale = intrinsics.get('depth_scale', self.camera_config['intrinsics']['depth_scale'])
+        
+        # 将2D关键点转换为3D
+        keypoints_3d = []
+        for kp_2d in keypoints_2d:
+            x_pixel, y_pixel = int(kp_2d[0]), int(kp_2d[1])
+            
+            # 检查像素坐标是否在图像范围内
+            if 0 <= x_pixel < depth_image.shape[1] and 0 <= y_pixel < depth_image.shape[0]:
+                # 获取深度值（单位：毫米）
+                depth_value = depth_image[y_pixel, x_pixel]
+                
+                if depth_value > 0:  # 有效深度值
+                    # 转换为米
+                    z = depth_value * depth_scale
+                    
+                    # 将像素坐标转换为三维坐标
+                    x = (x_pixel - cx) * z / fx
+                    y = (y_pixel - cy) * z / fy
+                    
+                    keypoints_3d.append([x, y, z])
+                    print(f"关键点: 2D({x_pixel}, {y_pixel}) -> 3D({x:.3f}, {y:.3f}, {z:.3f})")
+                else:
+                    # 深度值无效，使用零值
+                    keypoints_3d.append([0, 0, 0])
+                    print(f"关键点: 深度值无效，使用零值")
+            else:
+                # 像素坐标超出范围，使用零值
+                keypoints_3d.append([0, 0, 0])
+                print(f"关键点: 像素坐标超出范围，使用零值")
+        
+        return np.array(keypoints_3d)
+    
+    def real_time_tracking(self, save_dir=None, 
                           interval_seconds=1.0, max_frames=None, 
-                          initial_keypoints=None, show_preview=True):
+                          initial_keypoints=None, show_preview=True,
+                          session_name=None, vlm_query_dir=None):
         """实时跟踪和保存图像
         
         Args:
-            save_dir (str): 保存目录
+            save_dir (str): 保存目录，如果为None则使用vlm_query目录
             interval_seconds (float): 保存间隔（秒）
             max_frames (int): 最大保存帧数，None表示无限制
             initial_keypoints (numpy.ndarray): 初始关键点
             show_preview (bool): 是否显示预览窗口
+            session_name (str): 会话名称，用于创建子文件夹
+            vlm_query_dir (str): vlm_query目录路径，优先使用此目录
             
         Returns:
             bool: 是否成功完成
@@ -253,8 +321,41 @@ class CoTrackerClient:
         if not self.initialize_camera():
             return False
         
+        # 确定保存目录
+        if vlm_query_dir:
+            # 优先使用vlm_query目录下的cotracker_frames
+            base_save_dir = os.path.join(vlm_query_dir, 'cotracker_frames')
+        elif save_dir:
+            # 使用指定的save_dir
+            base_save_dir = save_dir
+        else:
+            # 默认使用当前目录下的vlm_query相关路径
+            # 查找最新的vlm_query目录
+            vlm_query_base = './vlm_query'
+            if os.path.exists(vlm_query_base):
+                vlm_dirs = [d for d in os.listdir(vlm_query_base) 
+                           if os.path.isdir(os.path.join(vlm_query_base, d))]
+                if vlm_dirs:
+                    # 使用最新的vlm_query目录
+                    latest_vlm_dir = sorted(vlm_dirs)[-1]
+                    base_save_dir = os.path.join(vlm_query_base, latest_vlm_dir, 'cotracker_frames')
+                else:
+                    base_save_dir = "./vlm_query/cotracker_frames"
+            else:
+                base_save_dir = "./vlm_query/cotracker_frames"
+        
         # 创建保存目录
-        os.makedirs(save_dir, exist_ok=True)
+        os.makedirs(base_save_dir, exist_ok=True)
+        
+        # 如果提供了会话名称，则创建子文件夹
+        if session_name:
+            session_dir = os.path.join(base_save_dir, session_name)
+            os.makedirs(session_dir, exist_ok=True)
+        else:
+            # 使用时间戳创建唯一的会话目录
+            timestamp = time.strftime("%Y%m%d_%H%M%S")
+            session_dir = os.path.join(base_save_dir, f'session_{timestamp}')
+            os.makedirs(session_dir, exist_ok=True)
         
         # 使用默认关键点或提供的关键点
         if initial_keypoints is None:
@@ -268,6 +369,7 @@ class CoTrackerClient:
         
         try:
             print(f"开始实时跟踪，保存间隔: {interval_seconds}秒")
+            print(f"图像将保存到: {session_dir}")
             print("按ESC键退出")
             
             while True:
@@ -286,7 +388,7 @@ class CoTrackerClient:
                         is_registered = True
                         # 保存第一帧
                         timestamp = time.strftime("%Y%m%d_%H%M%S")
-                        output_path = os.path.join(save_dir, f'frame_{frame_count:04d}_{timestamp}.png')
+                        output_path = os.path.join(session_dir, f'frame_{frame_count:04d}_{timestamp}.png')
                         self.save_frame_with_keypoints(color_image, keypoints, output_path, depth_image)
                         frame_count += 1
                         last_save_time = current_time
@@ -302,7 +404,7 @@ class CoTrackerClient:
                 if is_registered and (current_time - last_save_time) >= interval_seconds:
                     if max_frames is None or frame_count < max_frames:
                         timestamp = time.strftime("%Y%m%d_%H%M%S")
-                        output_path = os.path.join(save_dir, f'frame_{frame_count:04d}_{timestamp}.png')
+                        output_path = os.path.join(session_dir, f'frame_{frame_count:04d}_{timestamp}.png')
                         self.save_frame_with_keypoints(color_image, keypoints, output_path, depth_image)
                         frame_count += 1
                         last_save_time = current_time
@@ -321,7 +423,7 @@ class CoTrackerClient:
                     if key == 27:  # ESC键
                         break
             
-            print(f"总共保存了 {frame_count} 帧图像到 {save_dir}")
+            print(f"总共保存了 {frame_count} 帧图像到 {base_save_dir}")
             return True
             
         except KeyboardInterrupt:
@@ -336,13 +438,14 @@ class CoTrackerClient:
                 cv2.destroyAllWindows()
     
     def process_video_frames(self, frame_dir="frames_test", output_dir="output_frames", 
-                           initial_keypoints=None):
+                           initial_keypoints=None, session_name=None):
         """处理视频帧序列
         
         Args:
             frame_dir (str): 输入帧目录
             output_dir (str): 输出目录
             initial_keypoints (numpy.ndarray): 初始关键点，如果为None则使用默认值
+            session_name (str): 会话名称，用于创建子文件夹
             
         Returns:
             bool: 处理是否成功
@@ -359,21 +462,31 @@ class CoTrackerClient:
         if not os.path.exists(output_dir):
             os.makedirs(output_dir)
         
+        # 如果提供了会话名称，则创建子文件夹
+        if session_name:
+            session_dir = os.path.join(output_dir, session_name)
+        else:
+            # 使用时间戳创建唯一的会话目录
+            timestamp = time.strftime("%Y%m%d_%H%M%S")
+            session_dir = os.path.join(output_dir, f'session_{timestamp}')
+        
+        # 创建会话目录
+        os.makedirs(session_dir, exist_ok=True)
+        print(f"图像将保存到: {session_dir}")
+        
         # 加载第一帧
         first_img = np.array(Image.open(frame_files[0]))
         
         # 使用默认关键点或提供的关键点
-        if initial_keypoints is None:
-            keypoints = np.array([[475, 177], [469, 237]], dtype=np.float32)
-        else:
-            keypoints = initial_keypoints
+
+        keypoints = initial_keypoints
         
         # 注册初始帧
         status_code, response = self.register_frame(first_img, keypoints)
         print("Register:", status_code, response)
         
         # 保存初始帧
-        initial_output_path = os.path.join(output_dir, 'frame_1.jpg')
+        initial_output_path = os.path.join(session_dir, 'frame_1.jpg')
         self.save_frame_with_keypoints(first_img, keypoints, initial_output_path)
         
         # 跟踪后续帧
@@ -389,7 +502,7 @@ class CoTrackerClient:
                     continue
                 
                 # 保存带关键点的图像
-                output_path = os.path.join(output_dir, f'frame_{i+2}.jpg')
+                output_path = os.path.join(session_dir, f'frame_{i+2}.jpg')
                 self.save_frame_with_keypoints(img, tracked_keypoints, output_path)
         
         return True
@@ -440,7 +553,7 @@ def main():
         else:
             initial_keypoints = None
         
-        # 开始实时跟踪
+        # 开始实时跟踪（保存到vlm_query目录）
         client.real_time_tracking(
             interval_seconds=interval,
             max_frames=max_frames,

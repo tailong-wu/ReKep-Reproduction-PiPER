@@ -1,0 +1,9 @@
+def stage2_subgoal_constraint1(end_effector, keypoints):
+    """
+    The strawberry (keypoint 4) is at the center of the plate (mean of keypoints 0, 1, 2).
+    The cost is the Euclidean distance between keypoint 4 and the plate center.
+    """
+    plate_center = (keypoints[0] + keypoints[1] + keypoints[2]) / 3.0
+    cost = np.linalg.norm(keypoints[4] - plate_center)
+    return cost
+

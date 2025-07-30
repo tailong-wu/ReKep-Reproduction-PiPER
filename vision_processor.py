@@ -13,6 +13,7 @@ import numpy as np
 import cv2
 import json
 import time
+import yaml
 import warnings
 from typing import Optional, Tuple, List, Dict, Any
 
@@ -45,8 +46,9 @@ class VisionProcessor:
     """
     
     # Default camera intrinsics for different RealSense models
-    D435_INTRINSICS = CameraIntrinsics(fx=616.57, fy=616.52, ppx=322.57, ppy=246.28)
-    D435I_INTRINSICS = CameraIntrinsics(fx=608.90, fy=609.04, ppx=309.49, ppy=249.53)
+    # 统一使用彩色相机内参（原深度已经对齐到彩色相机上）
+    # 彩色相机内参
+    COLOR_INTRINSICS = CameraIntrinsics(fx=606.60, fy=605.47, ppx=323.69, ppy=247.12)
     
     def __init__(self, 
                  config_path: str = "./configs/config.yaml",
@@ -79,16 +81,17 @@ class VisionProcessor:
         # Set camera intrinsics from config or use provided ones
         if camera_intrinsics is None:
             intrinsics = self.camera_config['intrinsics']
+            # 统一使用彩色相机内参
+            color_intrinsics = intrinsics['color']
             self.camera_intrinsics = CameraIntrinsics(
-                fx=intrinsics['fx'],
-                fy=intrinsics['fy'],
-                ppx=intrinsics['ppx'],
-                ppy=intrinsics['ppy']
+                fx=color_intrinsics['fx'],
+                fy=color_intrinsics['fy'],
+                ppx=color_intrinsics['ppx'],
+                ppy=color_intrinsics['ppy']
             )
             self.depth_scale = intrinsics['depth_scale']
         else:
             self.camera_intrinsics = camera_intrinsics
-        
         # Set random seeds
         if seed is None:
             seed = self.config.get('seed', 42)
@@ -96,7 +99,10 @@ class VisionProcessor:
         
         # Initialize components
         self.keypoint_proposer = KeypointProposer(global_config['keypoint_proposer'])
-        self.constraint_generator = ConstraintGenerator(global_config['constraint_generator'])
+        
+        # Store config for lazy initialization of constraint_generator
+        self._constraint_generator_config = global_config['constraint_generator']
+        self._constraint_generator = None
         
         # Device configuration
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -116,8 +122,10 @@ class VisionProcessor:
             return {
                 'resolution': {'width': 640, 'height': 480, 'fps': 30},
                 'intrinsics': {
-                    'fx': 489.424683, 'fy': 489.424683,
-                    'ppx': 325.761810, 'ppy': 212.508759,
+                    'color': {
+                        'fx': 606.60, 'fy': 605.47,
+                        'ppx': 323.69, 'ppy': 247.12
+                    },
                     'depth_scale': 0.001
                 },
                 'processing': {'resize_width': 640, 'resize_height': 480}
@@ -144,13 +152,10 @@ class VisionProcessor:
         Returns:
             Tuple of (rgb_image, depth_image)
         """
+        # 使用标准命名格式
         if use_varied_camera:
             color_path = os.path.join(data_path, 'varied_camera_raw.png')
             depth_path = os.path.join(data_path, 'varied_camera_depth.npy')
-        else:
-            color_path = os.path.join(data_path, 'fixed_camera_raw.png')
-            depth_path = os.path.join(data_path, 'fixed_camera_depth.npy')
-        
         print(f"\033[92mLoading RGB from: {color_path}\033[0m")
         print(f"\033[92mLoading depth from: {depth_path}\033[0m")
         
@@ -193,6 +198,15 @@ class VisionProcessor:
         start_time = time.time()
         
         print(f"\033[92mRunning Dino-X object detection\033[0m")
+        print(f"\033[92mUsing image: {color_path}\033[0m")
+        
+        # 确保图像文件存在
+        if not os.path.exists(color_path):
+            raise FileNotFoundError(f"Could not find image file: {color_path}")
+            
+        # 创建输出目录
+        os.makedirs(output_dir, exist_ok=True)
+        
         gdino = GroundingDINO()
         predictions = gdino.get_dinox(color_path)
         bboxes, masks = gdino.visualize_bbox_and_mask(predictions, color_path, output_dir)
@@ -269,36 +283,15 @@ class VisionProcessor:
         
         return keypoints, projected_img, candidate_pixels_2d
     
-    def generate_constraints(self, projected_img: np.ndarray, instruction: str, keypoints: List, keypoints_2d: List = None) -> str:
-        """Generate motion planning constraints using the constraint generator.
-        
-        Args:
-            projected_img: Image with projected keypoints
-            instruction: Task instruction
-            keypoints: List of 3D keypoints
-            keypoints_2d: List of 2D pixel coordinates for keypoints
-            
-        Returns:
-            Path to the generated ReKep program directory
-        """
-        start_time = time.time()
-        
-        metadata = {
-            'init_keypoint_positions': keypoints,
-            'num_keypoints': len(keypoints)
-        }
-        
-        # Add 2D keypoint coordinates to metadata if available
-        if keypoints_2d is not None:
-            metadata['keypoints_2d_coordinates'] = keypoints_2d
-            print(f'{bcolors.OKGREEN}Added {len(keypoints_2d)} 2D keypoint coordinates to metadata{bcolors.ENDC}')
-        
-        rekep_program_dir = self.constraint_generator.generate(projected_img, instruction, metadata)
-        
-        print(f'{bcolors.HEADER}Constraints generated and saved in {rekep_program_dir}{bcolors.ENDC}')
-        self._timer_log("generate_constraints", time.time() - start_time)
-        
-        return rekep_program_dir
+    @property
+    def constraint_generator(self):
+        """Lazy initialization of constraint generator."""
+        if self._constraint_generator is None:
+            print(f"{bcolors.OKBLUE}Initializing constraint generator...{bcolors.ENDC}")
+            self._constraint_generator = ConstraintGenerator(self._constraint_generator_config)
+        return self._constraint_generator
+    
+
     
     def save_visualization(self, image: np.ndarray, output_path: str = './data/rekep_with_keypoints.png') -> None:
         """Save visualization image.
@@ -318,11 +311,12 @@ class VisionProcessor:
             print(f"\033[92mVisualization saved to: {output_path}\033[0m")
     
     def process_vision_task(self, 
-                          instruction: str,
+                          instruction: Optional[str] = None,
                           data_path: str = "./data/realsense_captures",
                           obj_list: Optional[str] = None,
                           use_varied_camera: bool = True,
-                          output_dir: str = './data/') -> str:
+                          output_dir: str = './data/',
+                          generate_constraints: bool = True) -> str:
         """Process a complete vision task for robotic manipulation.
         
         Args:
@@ -340,28 +334,102 @@ class VisionProcessor:
         # Load RGB-D data
         rgb, depth = self.load_rgb_depth_data(data_path, use_varied_camera)
         
-        # Detect objects
+        # 使用标准命名格式
         color_path = os.path.join(data_path, 
-                                'varied_camera_raw.png' if use_varied_camera else 'fixed_camera_raw.png')
+                            'varied_camera_raw.png' if use_varied_camera else 'fixed_camera_raw.png')
+        print(f"\033[92m使用标准命名格式进行对象检测: {color_path}\033[0m")
+        
+        # 保存RGB和深度图像到输出目录，以便后续处理
+        output_rgb_path = os.path.join(output_dir, 'varied_camera_raw.png' if use_varied_camera else 'fixed_camera_raw.png')
+        output_depth_path = os.path.join(output_dir, 'varied_camera_depth.npy' if use_varied_camera else 'fixed_camera_depth.npy')
+        
+        # 确保输出目录存在
+        os.makedirs(output_dir, exist_ok=True)
+        
+        # 保存RGB图像
+        cv2.imwrite(output_rgb_path, cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR))
+        
+        # 保存深度图像
+        np.save(output_depth_path, depth)
+        
+        print(f"\033[92m已保存RGB图像到: {output_rgb_path}\033[0m")
+        print(f"\033[92m已保存深度图像到: {output_depth_path}\033[0m")
+        
+        # 检测对象
         bboxes, masks = self.detect_objects(color_path, output_dir)
         
         # Generate point cloud
         points = self.depth_to_pointcloud(depth)
         
         # Generate keypoints
-        keypoints, projected_img, keypoints_2d = self.generate_keypoints(rgb, points, masks)
+        keypoints ,projected_img, keypoints_2d = self.generate_keypoints(rgb, points, masks)
         
-        # Save visualization
-        self.save_visualization(projected_img)
+        # Save visualization - 如果不生成约束，将在后面保存到场景目录
+        if generate_constraints:
+            self.save_visualization(projected_img)
+        # 如果不生成约束，可视化图像会在后面保存到场景目录
+        
+        # TODO transform keypoints_3d_cam to world coordinates(keypoints_3d_world)
+        # keypoints_3d_world = self.transform_keypoint_camera_to_world(keypoints)
+        
+        # 准备初始metadata
+        metadata = {
+            'init_keypoint_positions': keypoints,
+            'num_keypoints': len(keypoints)
+        }
+        
+        # Add 2D keypoint coordinates to metadata if available
+        if keypoints_2d is not None:
+            metadata['keypoints_2d_coordinates'] = keypoints_2d
+            print(f'{bcolors.OKGREEN}Added {len(keypoints_2d)} 2D keypoint coordinates to metadata{bcolors.ENDC}')
         
         # Generate constraints
-        rekep_program_dir = self.generate_constraints(projected_img, instruction, keypoints, keypoints_2d)
+        if generate_constraints:
+            if instruction is None:
+                raise ValueError("instruction is required when generate_constraints=True")
+            rekep_program_dir = self.constraint_generator.generate(projected_img, instruction, metadata)
+            print(f'{bcolors.HEADER}Constraints generated and saved in {rekep_program_dir}{bcolors.ENDC}')
+        else:
+            # 即使不生成约束，也要保存metadata到output_dir（v2c_demo场景目录）
+            from datetime import datetime
+            if instruction:
+                fname = datetime.now().strftime("%Y-%m-%d_%H-%M-%S") + "_" + instruction.lower().replace(" ", "_")
+            else:
+                fname = datetime.now().strftime("%Y-%m-%d_%H-%M-%S") + "_vision_task"
+            task_dir = os.path.join(output_dir, fname)
+            
+            print(f"\033[94m正在创建任务目录: {task_dir}\033[0m")
+            try:
+                os.makedirs(task_dir, exist_ok=True)
+                print(f"\033[92m任务目录创建成功: {task_dir}\033[0m")
+            except Exception as e:
+                print(f"\033[91m创建任务目录失败: {e}\033[0m")
+                raise
+            
+            # 保存查询图像到场景目录
+            image_path = os.path.join(task_dir, 'query_img.png')
+            cv2.imwrite(image_path, projected_img[..., ::-1])
+            
+            # 保存投影图像到场景目录
+            projected_img_path = os.path.join(task_dir, 'projected_keypoints.png')
+            cv2.imwrite(projected_img_path, cv2.cvtColor(projected_img, cv2.COLOR_RGB2BGR))
+            
+            # 保存metadata到场景目录
+            import json
+            for k, v in metadata.items():
+                if isinstance(v, np.ndarray):
+                    metadata[k] = v.tolist()
+            with open(os.path.join(task_dir, 'metadata.json'), 'w') as f:
+                json.dump(metadata, f, indent=4)
+            print(f"Metadata saved to {os.path.join(task_dir, 'metadata.json')}")
+            print(f"Projected keypoints image saved to {projected_img_path}")
+            
+            rekep_program_dir = task_dir
         
         total_time = time.time() - start_time
         print(f"\033[92mTotal processing time: {total_time:.2f} seconds\033[0m")
         
         return rekep_program_dir
-
 
 # Convenience functions for backward compatibility and ease of use
 def create_vision_processor(config_path: str = "./configs/config.yaml",
@@ -384,7 +452,7 @@ def create_vision_processor(config_path: str = "./configs/config.yaml",
     )
 
 
-def process_vision_task(instruction: str,
+def process_vision_task(instruction: Optional[str] = None,
                        data_path: str = "./data/realsense_captures",
                        obj_list: Optional[str] = None,
                        visualize: bool = True,

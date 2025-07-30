@@ -92,8 +92,12 @@ class ConstraintGenerator:
         if grasp_keypoints is None:
             raise ValueError("grasp_keypoints not found in output")
         # convert into list of ints
-        grasp_keypoints = grasp_keypoints['grasp_keypoints'].replace("[", "").replace("]", "").split(",")
-        grasp_keypoints = [int(x.strip()) for x in grasp_keypoints]
+        grasp_keypoints = grasp_keypoints['grasp_keypoints'].replace("[", "").replace("]", "")
+        # Remove comments (everything after #)
+        if '#' in grasp_keypoints:
+            grasp_keypoints = grasp_keypoints.split('#')[0]
+        grasp_keypoints = grasp_keypoints.split(",")
+        grasp_keypoints = [int(x.strip()) for x in grasp_keypoints if x.strip()]
         data_dict['grasp_keypoints'] = grasp_keypoints
         # find release_keypoints
         release_keypoints_template = "release_keypoints = {release_keypoints}"
@@ -104,8 +108,12 @@ class ConstraintGenerator:
         if release_keypoints is None:
             raise ValueError("release_keypoints not found in output")
         # convert into list of ints
-        release_keypoints = release_keypoints['release_keypoints'].replace("[", "").replace("]", "").split(",")
-        release_keypoints = [int(x.strip()) for x in release_keypoints]
+        release_keypoints = release_keypoints['release_keypoints'].replace("[", "").replace("]", "")
+        # Remove comments (everything after #)
+        if '#' in release_keypoints:
+            release_keypoints = release_keypoints.split('#')[0]
+        release_keypoints = release_keypoints.split(",")
+        release_keypoints = [int(x.strip()) for x in release_keypoints if x.strip()]
         data_dict['release_keypoints'] = release_keypoints
         return data_dict
 
@@ -134,18 +142,20 @@ class ConstraintGenerator:
         cv2.imwrite(image_path, img[..., ::-1])
         # build prompt
         messages = self._build_prompt(image_path, instruction)
-        # stream back the response
-        stream = self.client.chat.completions.create(model=self.config['model'],
-                                                        messages=messages,
-                                                        temperature=self.config['temperature'],
-                                                        max_tokens=self.config['max_tokens'],
-                                                        stream=True)
-        output = ""
+        # query OpenAI API
         start = time.time()
-        for chunk in stream:
-            print(f'[{time.time()-start:.2f}s] Querying OpenAI API...', end='\r')
-            if chunk.choices[0].delta.content is not None:
-                output += chunk.choices[0].delta.content
+        try:
+            print('Querying OpenAI API...', end='\r') 
+            response = self.client.chat.completions.create(model=self.config['model'],
+                                                      messages=messages,
+                                                      temperature=self.config['temperature'],
+                                                      max_tokens=self.config['max_tokens'],timeout=30)
+
+            output = response.choices[0].message.content
+            print(output)
+        except Exception as e:
+            print(f"Error: OpenAI API failed with error: {e}")
+            return None
         print(f'[{time.time()-start:.2f}s] Querying OpenAI API...Done')
         # save raw output
         with open(os.path.join(self.task_dir, 'output_raw.txt'), 'w') as f:
@@ -173,7 +183,7 @@ if __name__ == "__main__":
     print("Unite Test on Constraint generation")
     
     cg_obj = ConstraintGenerator(
-        model="chatgpt-4o-latest",
+        model="gpt-4o",
         temperature=0.0,        
         max_tokens=2048
     )

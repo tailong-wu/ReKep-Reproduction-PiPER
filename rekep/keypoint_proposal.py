@@ -73,10 +73,12 @@ class KeypointProposer:
         # exclude keypoints that are outside of the workspace
             # within_space = filter_points_by_bounds(candidate_keypoints, self.bounds_min, self.bounds_max, strict=False)
             # pdb.set_trace()
-            filtered_keypoints = filter_points_by_bounds(candidate_keypoints, self.bounds_min, self.bounds_max, strict=True)
+            bounds_max = [1,1,1]
+            bounds_min = [-1,-1,-1] 
+            filtered_keypoints = filter_points_by_bounds(candidate_keypoints, bounds_min, bounds_max, strict=True)
             # Create a boolean mask for the filtered keypoints
             within_space = np.array([np.any(np.all(candidate_keypoints[i] == filtered_keypoints, axis=1)) for i in range(len(candidate_keypoints))])
-    
+            within_space = np.ones(len(candidate_keypoints), dtype=bool) # TODO 暂时失效，这个范围暂时没有确定
             candidate_keypoints = candidate_keypoints[within_space]
             candidate_pixels = candidate_pixels[within_space]
             candidate_rigid_group_ids = candidate_rigid_group_ids[within_space]

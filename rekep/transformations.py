@@ -3,11 +3,15 @@ import numpy as np
 
 ### Conversions ###
 def quat_to_euler(quat, degrees=False):
-    euler = R.from_quat(quat).as_euler('xyz', degrees=degrees)
-    return euler
+    # Use ZYX order to match the correct conversion: [rz, ry, rx]
+    euler_zyx = R.from_quat(quat).as_euler('ZYX', degrees=degrees)
+    # Return in [rx, ry, rz] order
+    return np.array([euler_zyx[2], euler_zyx[1], euler_zyx[0]])
 
 def euler_to_quat(euler, degrees=False):
-    return R.from_euler('xyz', euler, degrees=degrees).as_quat()
+    # Use ZYX order to match the correct conversion: [rz, ry, rx]
+    rx, ry, rz = euler
+    return R.from_euler('ZYX', [rz, ry, rx], degrees=degrees).as_quat()
 
 def rmat_to_euler(rot_mat, degrees=False):
     euler = R.from_matrix(rot_mat).as_euler('xyz', degrees=degrees)

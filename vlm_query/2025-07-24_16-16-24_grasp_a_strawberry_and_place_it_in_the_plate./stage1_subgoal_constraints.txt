@@ -1,0 +1,8 @@
+def stage1_subgoal_constraint1(end_effector, keypoints):
+    """
+    Align the end-effector with the strawberry at keypoint 4.
+    The cost is the Euclidean distance between the end-effector and keypoint 4.
+    """
+    cost = np.linalg.norm(end_effector - keypoints[4])
+    return cost
+

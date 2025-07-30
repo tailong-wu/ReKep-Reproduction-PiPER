@@ -30,10 +30,14 @@ class RobotController:
         """
         self.interface = interface
         
+        # TCP偏移距离：夹爪底座到夹爪顶端的距离（米）
+        # self.TCP_OFFSET_DISTANCE = 0.135283
+        self.TCP_OFFSET_DISTANCE = 0.13
+        
         # 初始化机器人状态
         self.joint_limits = {
-            "lower": np.array([-np.pi, -np.pi, -np.pi, -np.pi, -np.pi, -np.pi]),
-            "upper": np.array([np.pi, np.pi, np.pi, np.pi, np.pi, np.pi])
+            'lower': np.array([-2.6179, 0, -2.967, -1.745, -1.22, -2.09439]),
+            'upper': np.array([2.6179, 3.14, 0, 1.745, 1.22, 2.09439])
         }
         self.ee_pose = np.zeros(7)  # [x, y, z, qx, qy, qz, qw]
         self.joint_positions = np.zeros(6)
@@ -62,16 +66,11 @@ class RobotController:
             Tuple[List[float], List[float]]: 返回末端位姿和关节角度的元组 (end_pose, joint_positions)
         """
         try:
-            # 获取当前末端位姿
-            arm_end_pose_msgs = self.piper.GetArmEndPoseMsgs()
-            end_pose = [
-                arm_end_pose_msgs.end_pose.X_axis / 1000000.0,  # Convert from 0.001mm to m
-                arm_end_pose_msgs.end_pose.Y_axis / 1000000.0,
-                arm_end_pose_msgs.end_pose.Z_axis / 1000000.0,
-                arm_end_pose_msgs.end_pose.RX_axis / 1000.0,  # Convert from 0.001deg to deg
-                arm_end_pose_msgs.end_pose.RY_axis / 1000.0,
-                arm_end_pose_msgs.end_pose.RZ_axis / 1000.0
-            ]
+            # 获取当前末端位姿（夹爪底座位置）
+            gripper_base_pose = self._get_raw_gripper_base_pose()
+            
+            # 应用TCP偏移修正：沿着法向量延伸
+            tcp_pose = self._apply_tcp_offset(gripper_base_pose)
             
             # 获取当前关节角度
             joint_msgs = self.piper.GetArmJointMsgs()
@@ -84,26 +83,108 @@ class RobotController:
                 joint_msgs.joint_state.joint_6 * np.pi / (180 * 1000),
             ]
 
-            return end_pose, joint_positions
+            return tcp_pose, joint_positions
 
         except Exception as e:
             print(f"获取机械臂数据时发生错误: {e}")
             return None, None
     
+    def _apply_tcp_offset(self, gripper_base_pose: List[float]) -> List[float]:
+        """应用TCP偏移修正：沿着法向量延伸TCP偏移距离
+        
+        Args:
+            gripper_base_pose: 夹爪底座位姿 [x, y, z, rx, ry, rz] (位置单位：米，角度单位：度)
+            
+        Returns:
+            List[float]: 修正后的TCP位姿 [x, y, z, rx, ry, rz]
+        """
+        try:
+            # 提取位置和姿态
+            position = np.array(gripper_base_pose[:3])
+            rotation_deg = np.array(gripper_base_pose[3:6])
+            
+            # 将角度转换为弧度
+            rotation_rad = rotation_deg * np.pi / 180.0
+            
+            # 使用欧拉角创建旋转矩阵（XYZ顺序）
+            from scipy.spatial.transform import Rotation as R
+            rotation_matrix = R.from_euler('xyz', rotation_rad).as_matrix()
+            
+            # 计算法向量（Z轴方向）
+            # 在机器人坐标系中，末端执行器的法向量通常是Z轴方向
+            normal_vector = rotation_matrix[:, 2]  # 取旋转矩阵的第三列（Z轴）
+            
+            # 沿着法向量延伸TCP偏移距离
+            tcp_position = position + normal_vector * (self.TCP_OFFSET_DISTANCE)
+            
+            # 返回修正后的位姿（姿态保持不变）
+            tcp_pose = [tcp_position[0], tcp_position[1], tcp_position[2], 
+                       rotation_deg[0], rotation_deg[1], rotation_deg[2]]
+            
+            return tcp_pose
+            
+        except Exception as e:
+            print(f"应用TCP偏移修正时发生错误: {e}")
+            # 如果修正失败，返回原始位姿
+            return gripper_base_pose
+    
+    def _remove_tcp_offset(self, tcp_pose: List[float]) -> List[float]:
+        """移除TCP偏移修正：将TCP位姿转换回夹爪底座位姿
+        
+        Args:
+            tcp_pose: TCP位姿 [x, y, z, rx, ry, rz] (位置单位：米，角度单位：度)
+            
+        Returns:
+            List[float]: 夹爪底座位姿 [x, y, z, rx, ry, rz]
+        """
+        try:
+            # 提取位置和姿态
+            position = np.array(tcp_pose[:3])
+            rotation_deg = np.array(tcp_pose[3:6])
+            
+            # 将角度转换为弧度
+            rotation_rad = rotation_deg * np.pi / 180.0
+            
+            # 使用欧拉角创建旋转矩阵（XYZ顺序）
+            from scipy.spatial.transform import Rotation as R
+            rotation_matrix = R.from_euler('xyz', rotation_rad).as_matrix()
+            
+            # 计算法向量（Z轴方向）
+            normal_vector = rotation_matrix[:, 2]  # 取旋转矩阵的第三列（Z轴）
+            
+            # 沿着法向量反向移动TCP偏移距离
+            gripper_base_position = position - normal_vector * self.TCP_OFFSET_DISTANCE
+            
+            # 返回夹爪底座位姿（姿态保持不变）
+            gripper_base_pose = [gripper_base_position[0], gripper_base_position[1], gripper_base_position[2], 
+                               rotation_deg[0], rotation_deg[1], rotation_deg[2]]
+            
+            return gripper_base_pose
+            
+        except Exception as e:
+            print(f"移除TCP偏移修正时发生错误: {e}")
+            # 如果修正失败，返回原始位姿
+            return tcp_pose
+    
     def action(self, end_pose: List[float], grip_angle: int, grip_force: int = 1000):
         """移动机械臂到指定的末端位姿，注意action的end_pose需要同时提供夹爪控制
         
         Args:
-            end_pose: 包含末端位姿的列表，格式为 [X, Y, Z, RX, RY, RZ]
+            end_pose: 包含TCP末端位姿的列表，格式为 [X, Y, Z, RX, RY, RZ]（夹爪顶端位置）
             grip_angle: 夹爪角度
             grip_force: 手爪控制力（默认 1000）
         """
         if len(end_pose) != 6:
             raise ValueError("end_pose 必须包含 6 个元素：[X, Y, Z, RX, RY, RZ]")
         
+        # 将TCP位姿转换为夹爪底座位姿
+        gripper_base_pose = self._remove_tcp_offset(end_pose)
+        
         factor = 1000  # 缩放因子
-        X, Y, Z, RX, RY, RZ = [round(val * factor) for val in end_pose]
+        X, Y, Z, RX, RY, RZ = [round(val * factor) for val in gripper_base_pose]
 
+        print(f"TCP位姿: {end_pose}")
+        print(f"转换为夹爪底座位姿: {gripper_base_pose}")
         print(f"移动机械臂到位置: X={X}, Y={Y}, Z={Z}, RX={RX}, RY={RY}, RZ={RZ}")
         print(f"夹爪角度和力矩: 角度={grip_angle}，力矩={grip_force}")
         self.piper.EndPoseCtrl(X, Y, Z, RX, RY, RZ)
@@ -112,15 +193,22 @@ class RobotController:
     
     def send_pose_to_robot(self, end_pose):
         """发送位姿到机器人控制器执行
-        
+        暂未使用，使用pose控制PiPER时有一些问题。
         Args:
-            end_pose: 要执行的位姿 (x, y, z, Rx, Ry, Rz)
+            end_pose: 要执行的TCP位姿 (x, y, z, Rx, Ry, Rz)（夹爪顶端位置）
         """
         try:
             if len(end_pose) != 6:
                 raise ValueError("end_pose 必须包含 6 个元素：[X, Y, Z, RX, RY, RZ]")
+            
+            # 将TCP位姿转换为夹爪底座位姿
+            gripper_base_pose = self._remove_tcp_offset(end_pose)
+            
             factor = 1000  # 缩放因子
-            X, Y, Z, RX, RY, RZ = [round(val * factor) for val in end_pose]
+            X, Y, Z, RX, RY, RZ = [round(val * factor) for val in gripper_base_pose]
+            
+            print(f"TCP位姿: {end_pose}")
+            print(f"转换为夹爪底座位姿: {gripper_base_pose}")
             print(f"移动机械臂到位置: X={X}, Y={Y}, Z={Z}, RX={RX}, RY={RY}, RZ={RZ}")
             self.piper.EndPoseCtrl(X, Y, Z, RX, RY, RZ)
             print("机械臂已到达目标位置")
@@ -128,13 +216,41 @@ class RobotController:
             print("Error while sending pose to robot:", e)
     
     def get_tcp_pose(self):
-        """获取当前末端执行器位姿
+        """获取当前末端执行器位姿（已应用TCP偏移修正）
         
         Returns:
-            List[float]: 当前TCP位姿 [x, y, z, rx, ry, rz]
+            List[float]: 当前TCP位姿 [x, y, z, rx, ry, rz]，已修正为夹爪顶端位置
         """
         pose, _ = self.get_robot_pose_and_joints()
         return pose
+    
+    def _get_raw_gripper_base_pose(self):
+        """获取原始夹爪底座位姿数据
+        
+        Returns:
+            List[float]: 夹爪底座位姿 [x, y, z, rx, ry, rz]，单位已转换
+        """
+        arm_end_pose_msgs = self.piper.GetArmEndPoseMsgs()
+        return [
+            arm_end_pose_msgs.end_pose.X_axis / 1000000.0,  # Convert from 0.001mm to m
+            arm_end_pose_msgs.end_pose.Y_axis / 1000000.0,
+            arm_end_pose_msgs.end_pose.Z_axis / 1000000.0,
+            arm_end_pose_msgs.end_pose.RX_axis / 1000.0,  # Convert from 0.001deg to deg
+            arm_end_pose_msgs.end_pose.RY_axis / 1000.0,
+            arm_end_pose_msgs.end_pose.RZ_axis / 1000.0
+        ]
+    
+    def get_gripper_base_pose(self):
+        """获取当前夹爪底座位姿（未应用TCP偏移修正）
+        
+        Returns:
+            List[float]: 当前夹爪底座位姿 [x, y, z, rx, ry, rz]，机械臂法兰盘位置
+        """
+        try:
+            return self._get_raw_gripper_base_pose()
+        except Exception as e:
+            print(f"获取夹爪底座位姿时发生错误: {e}")
+            return None
     
     def get_joint_positions(self):
         """获取当前关节位置
@@ -203,18 +319,13 @@ class RobotController:
         print("机械臂使能成功")
     
     def _update_robot_state(self):
-        """更新机器人状态"""
+        """更新机器人状态（应用TCP偏移修正）"""
         try:
-            # 获取当前末端位姿
-            arm_end_pose_msgs = self.piper.GetArmEndPoseMsgs()
-            end_pose = [
-                arm_end_pose_msgs.end_pose.X_axis / 1000000.0,  # Convert from 0.001mm to m
-                arm_end_pose_msgs.end_pose.Y_axis / 1000000.0,
-                arm_end_pose_msgs.end_pose.Z_axis / 1000000.0,
-                arm_end_pose_msgs.end_pose.RX_axis / 1000.0,  # Rotation stays in 0.001 units
-                arm_end_pose_msgs.end_pose.RY_axis / 1000.0,
-                arm_end_pose_msgs.end_pose.RZ_axis / 1000.0
-            ]
+            # 获取当前末端位姿（夹爪底座位置）
+            gripper_base_pose = self._get_raw_gripper_base_pose()
+            
+            # 应用TCP偏移修正
+            tcp_pose = self._apply_tcp_offset(gripper_base_pose)
             
             # 获取当前关节角度
             joint_msgs = self.piper.GetArmJointMsgs()
@@ -227,9 +338,9 @@ class RobotController:
                 joint_msgs.joint_state.joint_6,
             ]
             
-            # 转换为米单位和四元数表示
-            position = np.array(end_pose[:3]) / 1000.0  # 转换为米
-            rotation = R.from_euler('xyz', np.array(end_pose[3:6]) / 1000.0, degrees=True)
+            # 转换为米单位和四元数表示（使用修正后的TCP位姿）
+            position = np.array(tcp_pose[:3])  # 已经是米单位
+            rotation = R.from_euler('xyz', np.array(tcp_pose[3:6]), degrees=True)
             quaternion = rotation.as_quat()  # [x, y, z, w]格式
             
             # 更新末端位姿
@@ -256,8 +367,46 @@ class RobotController:
             if current_joints is None or end_pose is None:
                 raise RuntimeError("无法获取机器人状态")
             
+            # 根据stage决定读取哪个robot_state.json文件
+            robot_state_path = './robot_state.json'
+            previous_state = None
+            
+            # 尝试读取现有的robot_state.json或robot_state_{stage-1}.json
+            try:
+                if current_stage == 1:
+                    # 第1阶段，读取robot_state.json
+                    if os.path.exists(robot_state_path):
+                        with open(robot_state_path, 'r') as f:
+                            previous_state = json.load(f)
+                            print(f"\033[92m读取初始状态文件: {robot_state_path}\033[0m")
+                else:
+                    # 第2+阶段，尝试读取上一阶段的状态文件
+                    
+                    # 获取rekep_program_dir
+                    rekep_program_dir = None
+                    if hasattr(self, 'rekep_program_dir') and self.rekep_program_dir:
+                        rekep_program_dir = self.rekep_program_dir
+                    elif hasattr(self, 'env') and hasattr(self.env, 'rekep_program_dir') and self.env.rekep_program_dir:
+                        rekep_program_dir = self.env.rekep_program_dir
+                    
+                    if rekep_program_dir:
+                        previous_stage_path = os.path.join(rekep_program_dir, f'robot_state_{current_stage-1}.json')
+                        if os.path.exists(previous_stage_path):
+                            with open(previous_stage_path, 'r') as f:
+                                previous_state = json.load(f)
+                                print(f"\033[92m读取上一阶段状态文件: {previous_stage_path}\033[0m")
+                        else:
+                            # 如果找不到上一阶段文件，尝试读取robot_state.json
+                            if os.path.exists(robot_state_path):
+                                with open(robot_state_path, 'r') as f:
+                                    previous_state = json.load(f)
+                                    print(f"\033[93m未找到上一阶段状态文件，读取初始状态: {robot_state_path}\033[0m")
+            except Exception as e:
+                print(f"\033[93m读取状态文件失败: {e}，将使用当前状态\033[0m")
+            
             # 构建机器人状态信息
             robot_state = {
+                "timestamp": time.time(),
                 "rekep_state": current_stage,
                 "rekep_stage": current_stage,
                 "joint_info": {
@@ -266,7 +415,7 @@ class RobotController:
                 },
                 "ee_info": {
                     "position": end_pose[:3],  # 米单位 [x, y, z]
-                    "orientation": end_pose[3:6]  # 旋转向量 [rx, ry, rz] (0.001度单位)
+                    "orientation": end_pose[3:6]  # 旋转向量 [rx, ry, rz] (弧度单位)
                 },
                 "gripper_info": {
                     "state": 0.0  # 假设夹爪状态为0（张开）
@@ -280,13 +429,29 @@ class RobotController:
                     "control_mode": "position",
                     "operation_mode": "auto"
                 },
-                "misc": {
-                    "world2robot_homo": [[0.71659986, -0.6894734, 0.10540908, 0.29309614],
-                                        [-0.66892568, -0.72216724, -0.17610487, 0.49516889],
-                                        [0.19754261, 0.05568588, -0.9787114, 0.42916608],
-                                        [0.0, 0.0, 0.0, 1.0]]
-                }
+                "misc": {}
             }
+            
+            # 从previous_state中保留必要信息
+            if previous_state:
+                # 保留initial_position
+                if 'initial_position' in previous_state:
+                    robot_state['initial_position'] = previous_state['initial_position']
+                else:
+                    # 如果没有initial_position，使用当前状态创建
+                    robot_state['initial_position'] = {
+                        "joint_positions": current_joints,
+                        "ee_position": end_pose[:3],
+                        "ee_orientation": end_pose[3:6]
+                    }
+                
+                # 保留world2robot_homo矩阵
+                if 'misc' in previous_state and 'world2robot_homo' in previous_state['misc']:
+                    robot_state['misc']['world2robot_homo'] = previous_state['misc']['world2robot_homo']
+                
+                # 保留raw_data
+                if 'raw_data' in previous_state:
+                    robot_state['raw_data'] = previous_state['raw_data']
             
             return robot_state
             
@@ -364,11 +529,6 @@ class RobotController:
         factor_to_rad = np.pi / (180 * 1000)
         
         while True:
-            # 控制夹爪
-            if gripper_val == 0:
-                self.piper.GripperCtrl(50*1000, 1000, 0x01, 0)  # 张开 50mm
-            else:
-                self.piper.GripperCtrl(0*1000, 1000, 0x01, 0)  # 闭合
             
             # 发送关节控制指令
             self.piper.JointCtrl(
@@ -396,6 +556,12 @@ class RobotController:
             # 检查是否达到目标
             if joint_error < tolerance:
                 print("已到达目标关节角度。")
+                # 控制夹爪
+                time.sleep(2)
+                if gripper_val == 0:
+                    self.piper.GripperCtrl(100*1000, 1000, 0x01, 0)  # 张开 100mm
+                else:
+                    self.piper.GripperCtrl(0*1000, 1000, 0x01, 0)  # 闭合
                 break
                 
             time.sleep(0.1)
@@ -404,7 +570,7 @@ class RobotController:
         """移动到目标位姿
         
         Args:
-            target_pose: 目标位姿 [x, y, z, qx, qy, qz, qw]
+            target_pose: 目标TCP位姿 [x, y, z, qx, qy, qz, qw]（夹爪顶端位置）
             speed: 移动速度 (m/s)
             acceleration: 加速度 (m/s^2)
             precise: 是否精确移动
@@ -429,17 +595,25 @@ class RobotController:
             rotation = R.from_quat(quaternion)
             euler_angles = rotation.as_euler('xyz', degrees=True)
             
+            # 构建TCP位姿（欧拉角格式）
+            tcp_pose = [position[0], position[1], position[2], 
+                       euler_angles[0], euler_angles[1], euler_angles[2]]
+            
+            # 将TCP位姿转换为夹爪底座位姿
+            gripper_base_pose = self._remove_tcp_offset(tcp_pose)
+            
             # 转换为Piper控制器可接受的格式（0.001mm和0.001度）
-            # position is in meters, need to convert to 0.001mm units
             pos_factor = 1000000  # m -> 0.001mm conversion factor
             rot_factor = 1000     # deg -> 0.001deg conversion factor
-            X = round(position[0] * pos_factor)
-            Y = round(position[1] * pos_factor)
-            Z = round(position[2] * pos_factor)
-            RX = round(euler_angles[0] * rot_factor)
-            RY = round(euler_angles[1] * rot_factor)
-            RZ = round(euler_angles[2] * rot_factor)
+            X = round(gripper_base_pose[0] * pos_factor)
+            Y = round(gripper_base_pose[1] * pos_factor)
+            Z = round(gripper_base_pose[2] * pos_factor)
+            RX = round(gripper_base_pose[3] * rot_factor)
+            RY = round(gripper_base_pose[4] * rot_factor)
+            RZ = round(gripper_base_pose[5] * rot_factor)
             
+            print(f"TCP位姿: {tcp_pose}")
+            print(f"转换为夹爪底座位姿: {gripper_base_pose}")
             print(f"移动到位姿: X={X}, Y={Y}, Z={Z}, RX={RX}, RY={RY}, RZ={RZ}")
             self.piper.EndPoseCtrl(X, Y, Z, RX, RY, RZ)
             
@@ -532,17 +706,21 @@ class RobotController:
             return False
         # 这里简单返回False，避免影响正常的抓取逻辑
         # 实际使用时应替换为真实的传感器反馈逻辑
-        return False
+        return True
     
     def get_ee_pose(self) -> np.ndarray:
-        """获取末端执行器的位姿"""
+        """获取末端执行器的位姿（已应用TCP偏移修正）
+        
+        Returns:
+            np.ndarray: 修正后的TCP位姿，已修正为夹爪顶端位置
+        """
         return self.get_robot_pose_and_joints()[0]
 
 
 class ReKepEnv:
     """ReKep环境类，用于机器人操作和关键点跟踪"""
     
-    def __init__(self, interface: str = "can0", test_mode: bool = False, verbose: bool = True, camera_instance=None, cotracker_client=None):
+    def __init__(self, interface: str = "can0", test_mode: bool = False, verbose: bool = True, camera_instance=None, cotracker_client=None, rekep_program_dir=None, camera_config_path="./configs/camera_config.yaml"):
         """初始化ReKep环境
         
         Args:
@@ -551,34 +729,81 @@ class ReKepEnv:
             verbose: 是否启用详细输出
             camera_instance: 外部传入的相机实例，用于避免重复创建相机pipeline
             cotracker_client: 外部传入的CoTracker客户端实例
+            rekep_program_dir: ReKep程序目录路径，用于读取和保存状态文件
+            camera_config_path: 相机配置文件路径
         """
         self.verbose = verbose
+        self.rekep_program_dir = rekep_program_dir
+        self.camera_config_path = camera_config_path
         
         # 初始化机器人控制器
         self.robot = RobotController(interface, test_mode)
+        # 将rekep_program_dir传递给robot对象
+        self.robot.rekep_program_dir = rekep_program_dir
         
         # 关键点相关变量
         self.keypoints = None
         self.keypoints_2d = None
         self.cotracker_client = None
+        self._keypoint_object_cache = {}  # 缓存关键点对应的物体，避免重复查询
         
         # 相机相关
         self.external_camera = camera_instance  # 外部传入的相机实例
         self.camera_pipeline = None
         self.camera_config = None
-        self.intrinsics = None
+        
+        # 加载相机配置并设置内参
+        self.camera_config_data = self._load_camera_config()
+        self.intrinsics = self.get_intrinsics()
         
         # 初始化关键点跟踪器
         self.initialize_keypoint_tracker(cotracker_client)
         
-        # 工作空间边界
-        self.bounds_min = np.array([0.1, -0.5, 0.0])  # 最小边界
-        self.bounds_max = np.array([0.8, 0.5, 0.8])   # 最大边界
+        # 从配置文件加载工作空间边界和插值参数
+        self._load_workspace_config()
         
-        # 插值参数
-        self.interpolate_pos_step_size = 0.02  # 位置插值步长 (m)
-        self.interpolate_rot_step_size = 0.1   # 旋转插值步长 (rad)
         
+    def _load_workspace_config(self, config_path: str = "./configs/config.yaml"):
+        """从配置文件加载工作空间边界和插值参数
+        
+        Args:
+            config_path: 配置文件路径
+        """
+        try:
+            import yaml
+            with open(config_path, 'r', encoding='utf-8') as f:
+                config = yaml.safe_load(f)
+            
+            # 从main配置中读取边界
+            if 'main' in config:
+                main_config = config['main']
+                self.bounds_min = np.array(main_config.get('bounds_min', [0.1, -0.5, 0.02]))
+                self.bounds_max = np.array(main_config.get('bounds_max', [0.8, 0.5, 0.8]))
+                self.interpolate_pos_step_size = main_config.get('interpolate_pos_step_size', 0.02)
+                self.interpolate_rot_step_size = main_config.get('interpolate_rot_step_size', 0.1)
+            else:
+                # 如果没有main配置，使用默认值
+                self.bounds_min = np.array([0.1, -0.5, 0.02])
+                self.bounds_max = np.array([0.8, 0.5, 0.8])
+                self.interpolate_pos_step_size = 0.02
+                self.interpolate_rot_step_size = 0.1
+                print("\033[93m警告: 配置文件中未找到main配置，使用默认工作空间边界\033[0m")
+            
+            if self.verbose:
+                print(f"从配置文件加载工作空间边界:")
+                print(f"  bounds_min: {self.bounds_min}")
+                print(f"  bounds_max: {self.bounds_max}")
+                print(f"  插值步长: pos={self.interpolate_pos_step_size}, rot={self.interpolate_rot_step_size}")
+                
+        except Exception as e:
+            print(f"\033[91m加载工作空间配置失败: {e}\033[0m")
+            print("\033[93m使用默认工作空间边界\033[0m")
+            # 使用默认值
+            self.bounds_min = np.array([0.1, -0.5, 0.02])
+            self.bounds_max = np.array([0.8, 0.5, 0.8])
+            self.interpolate_pos_step_size = 0.02
+            self.interpolate_rot_step_size = 0.1
+    
     def initialize_keypoint_tracker(self, cotracker_client=None):
         """初始化关键点跟踪器
         
@@ -622,10 +847,23 @@ class ReKepEnv:
             
             # 如果没有外部相机，则使用自己的pipeline
             if self.camera_pipeline is None:
+                # 加载相机配置
+                config = self._load_camera_config()
+                resolution = config['resolution']
+                width = resolution['width']
+                height = resolution['height']
+                fps = resolution['fps']
+                
+                # 初始化相机
                 self.camera_pipeline = rs.pipeline()
                 self.camera_config = rs.config()
-                self.camera_config.enable_stream(rs.stream.depth, 640, 480, rs.format.z16, 30)
-                self.camera_config.enable_stream(rs.stream.color, 640, 480, rs.format.bgr8, 30)
+                
+                # 检查是否有指定的序列号
+                if 'realsense' in config and config['realsense']['serial_number']:
+                    self.camera_config.enable_device(config['realsense']['serial_number'])
+                
+                self.camera_config.enable_stream(rs.stream.depth, width, height, rs.format.z16, fps)
+                self.camera_config.enable_stream(rs.stream.color, width, height, rs.format.bgr8, fps)
                 self.camera_pipeline.start(self.camera_config)
                 
                 # 等待相机稳定
@@ -652,6 +890,34 @@ class ReKepEnv:
             print(f"获取相机视图时出错: {e}")
             return None, None
     
+    def _load_camera_config(self) -> Dict[str, Any]:
+        """加载相机配置文件
+        
+        Returns:
+            Dict[str, Any]: 相机配置
+        """
+        try:
+            with open(self.camera_config_path, 'r') as f:
+                return yaml.safe_load(f)
+        except Exception as e:
+            print(f"加载相机配置文件失败: {e}")
+            # 返回默认配置，使用新的结构（depth和color分开）
+            return {
+                'resolution': {'width': 640, 'height': 480, 'fps': 30},
+                'intrinsics': {
+                    'depth': {
+                        'fx': 382.06, 'fy': 382.06,
+                        'ppx': 321.79, 'ppy': 235.10
+                    },
+                    'color': {
+                        'fx': 606.60, 'fy': 605.47,
+                        'ppx': 323.69, 'ppy': 247.12
+                    },
+                    'depth_scale': 0.001
+                },
+                'processing': {'resize_width': 640, 'resize_height': 480}
+            }
+    
     def get_intrinsics(self) -> Optional[Dict[str, Any]]:
         """获取相机内参
         
@@ -659,34 +925,57 @@ class ReKepEnv:
             Optional[Dict[str, Any]]: 相机内参字典
         """
         try:
-            if self.camera_pipeline is None:
-                return None
+            # 使用已加载的配置数据
+            if hasattr(self, 'camera_config_data') and self.camera_config_data:
+                config = self.camera_config_data
+            else:
+                # 如果尚未加载，则加载配置
+                config = self._load_camera_config()
                 
-            profile = self.camera_pipeline.get_active_profile()
-            depth_profile = rs.video_stream_profile(profile.get_stream(rs.stream.depth))
-            color_profile = rs.video_stream_profile(profile.get_stream(rs.stream.color))
+            intrinsics = config['intrinsics']
+            resolution = config['resolution']
             
-            depth_intrinsics = depth_profile.get_intrinsics()
-            color_intrinsics = color_profile.get_intrinsics()
-            
-            return {
-                'depth': {
-                    'fx': depth_intrinsics.fx,
-                    'fy': depth_intrinsics.fy,
-                    'ppx': depth_intrinsics.ppx,
-                    'ppy': depth_intrinsics.ppy,
-                    'width': depth_intrinsics.width,
-                    'height': depth_intrinsics.height
-                },
-                'color': {
-                    'fx': color_intrinsics.fx,
-                    'fy': color_intrinsics.fy,
-                    'ppx': color_intrinsics.ppx,
-                    'ppy': color_intrinsics.ppy,
-                    'width': color_intrinsics.width,
-                    'height': color_intrinsics.height
+            # 检查intrinsics结构
+            if 'depth' in intrinsics and 'color' in intrinsics:
+                # 新结构：intrinsics下有depth和color子字典
+                return {
+                    'depth': {
+                        'fx': intrinsics['depth']['fx'],
+                        'fy': intrinsics['depth']['fy'],
+                        'ppx': intrinsics['depth']['ppx'],
+                        'ppy': intrinsics['depth']['ppy'],
+                        'width': resolution['width'],
+                        'height': resolution['height']
+                    },
+                    'color': {
+                        'fx': intrinsics['color']['fx'],
+                        'fy': intrinsics['color']['fy'],
+                        'ppx': intrinsics['color']['ppx'],
+                        'ppy': intrinsics['color']['ppy'],
+                        'width': resolution['width'],
+                        'height': resolution['height']
+                    }
                 }
-            }
+            else:
+                # 旧结构：intrinsics直接包含fx、fy等键
+                return {
+                    'depth': {
+                        'fx': intrinsics['fx'],
+                        'fy': intrinsics['fy'],
+                        'ppx': intrinsics['ppx'],
+                        'ppy': intrinsics['ppy'],
+                        'width': resolution['width'],
+                        'height': resolution['height']
+                    },
+                    'color': {
+                        'fx': intrinsics['fx'],
+                        'fy': intrinsics['fy'],
+                        'ppx': intrinsics['ppx'],
+                        'ppy': intrinsics['ppy'],
+                        'width': resolution['width'],
+                        'height': resolution['height']
+                    }
+                }
             
         except Exception as e:
             print(f"获取相机内参时出错: {e}")
@@ -706,7 +995,11 @@ class ReKepEnv:
     
     def action(self, end_pose: List[float], grip_angle: int, grip_force: int = 1000):
         """执行机器人动作"""
-        return self.robot.action(end_pose, grip_angle, grip_force)
+        # 验证并修正位置，确保在安全边界内
+        validated_position = self.validate_position(np.array(end_pose[:3]))
+        validated_end_pose = validated_position.tolist() + end_pose[3:]
+        
+        return self.robot.action(validated_end_pose, grip_angle, grip_force)
     
     def send_pose_to_robot(self, end_pose):
         """发送位姿到机器人"""
@@ -757,9 +1050,7 @@ class ReKepEnv:
         gripper_action = action[7]
         
         # 安全检查：确保目标位置在工作空间内
-        if np.any(target_pose[:3] < self.bounds_min) or np.any(target_pose[:3] > self.bounds_max):
-            print(f"目标位置超出工作空间边界，将被裁剪到工作空间内")
-            target_pose[:3] = np.clip(target_pose[:3], self.bounds_min, self.bounds_max)
+        target_pose[:3] = self.validate_position(target_pose[:3])
         
         # 插值移动
         current_pose = self.get_ee_pose()
@@ -889,6 +1180,35 @@ class ReKepEnv:
         tcp_pose = self.robot.get_tcp_pose()
         return np.array(tcp_pose[:3])
     
+    def validate_position(self, position: np.ndarray) -> np.ndarray:
+        """验证并修正位置，确保在安全边界内
+        
+        Args:
+            position: 要验证的位置 [x, y, z]
+            
+        Returns:
+            np.ndarray: 修正后的安全位置
+        """
+        position = np.array(position)
+        original_position = position.copy()
+        
+        # 检查并修正每个轴的位置
+        for i in range(3):
+            if position[i] < self.bounds_min[i]:
+                axis_name = ['X', 'Y', 'Z'][i]
+                print(f"\033[91m警告: {axis_name}坐标 {position[i]:.4f}m 小于安全限制 {self.bounds_min[i]:.4f}m，调整为 {self.bounds_min[i]:.4f}m\033[0m")
+                position[i] = self.bounds_min[i]
+            elif position[i] > self.bounds_max[i]:
+                axis_name = ['X', 'Y', 'Z'][i]
+                print(f"\033[91m警告: {axis_name}坐标 {position[i]:.4f}m 大于安全限制 {self.bounds_max[i]:.4f}m，调整为 {self.bounds_max[i]:.4f}m\033[0m")
+                position[i] = self.bounds_max[i]
+        
+        # 如果位置被修正，输出信息
+        if not np.allclose(original_position, position):
+            print(f"位置已从 {original_position} 修正为 {position}")
+        
+        return position
+    
     def get_ee_pose(self) -> np.ndarray:
         """获取当前末端执行器位姿"""
         return self.robot.get_ee_pose()
@@ -903,8 +1223,12 @@ class ReKepEnv:
     
     def register_keypoints(self, keypoints: List[List[float]], keypoints_2d: List[List[float]] = None):
         """注册关键点"""
+        # self.update_keypoints(keypoints)
+        # 这里的keypoint是Camera坐标系下的。
         self.keypoints = np.array(keypoints)
         
+        # 清除关键点对象缓存，因为关键点已经改变
+        self._keypoint_object_cache = {}
         
         # 如果提供了2D关键点并且CoTrackerClient可用，则进行关键点注册
         if keypoints_2d is not None and self.cotracker_client is not None:
@@ -919,9 +1243,12 @@ class ReKepEnv:
             return False
     
     def update_keypoints(self, keypoints: List[List[float]]):
-        """更新关键点"""
-        self.keypoints = np.array(keypoints)
-        print(f"已更新 {len(keypoints)} 个关键点")
+        """更新关键点（相机坐标系）"""
+        # self.keypoints = np.array(keypoints)
+        # 清除关键点对象缓存，因为关键点已经改变
+        self._keypoint_object_cache = {}
+        # TODO
+        print(f"MOCK====已更新 {len(keypoints)} 个关键点====MOCK ")
     
     def register_keypoints_for_tracking(self):
         """为跟踪注册关键点"""
@@ -936,6 +1263,9 @@ class ReKepEnv:
                 print("无法获取相机图像，关键点注册失败")
                 return
             
+            # 清除关键点对象缓存，因为关键点可能已经改变
+            self._keypoint_object_cache = {}
+            
             # 注册关键点
             keypoints_array = np.array(self.keypoints_2d, dtype=np.float32)
             status_code, response = self.cotracker_client.register_frame(rgb_image, keypoints_array)
@@ -949,86 +1279,59 @@ class ReKepEnv:
         except Exception as e:
             print(f"注册关键点时出错: {e}")
     
-    def update_keypoints_3d_from_tracking(self, tracked_keypoints_2d: List[List[float]], 
-                                         visibility_mask: List[bool] = None,
-                                         depth_image: np.ndarray = None,
-                                         intrinsics: Dict[str, float] = None):
-        """根据跟踪到的2D关键点更新3D关键点位置"""
-        if self.keypoints is None:
-            print("尚未注册关键点，无法更新")
-            return
+    def track_keypoints(self) -> Tuple[bool, List[List[float]]]:
+        """跟踪关键点并更新3D位置
         
-        # 如果没有提供深度图像或内参，尝试从相机获取
-        if depth_image is None or intrinsics is None:
-            _, depth_image = self.get_camera_view()
-            if depth_image is None:
-                print("无法获取深度图像，保持原有关键点位置")
-                return
+        Returns:
+            Tuple[bool, List[List[float]]]: (成功标志, 跟踪到的3D关键点列表)
+        """
+        if self.cotracker_client is None:
+            print("CoTracker客户端未初始化，无法跟踪关键点")
+            return False, []
+        
+        try:
+            # 获取当前相机图像
+            rgb_image, depth_image = self.get_camera_view()
+            if rgb_image is None or depth_image is None:
+                print("无法获取相机图像，关键点跟踪失败")
+                return False, []
             
-            intrinsics_dict = self.get_intrinsics()
-            if not intrinsics_dict or 'depth' not in intrinsics_dict:
-                print("无法获取相机内参，保持原有关键点位置")
-                return
-            
-            depth_intrinsics = intrinsics_dict['depth']
-            fx = depth_intrinsics['fx']
-            fy = depth_intrinsics['fy']
-            cx = depth_intrinsics['ppx']
-            cy = depth_intrinsics['ppy']
-        else:
-            # 使用提供的参数
-            fx = intrinsics['fx']
-            fy = intrinsics['fy']
-            cx = intrinsics['ppx']
-            cy = intrinsics['ppy']
-        
-        # 如果没有提供可见性掩码，默认所有关键点都可见
-        if visibility_mask is None:
-            visibility_mask = [True] * len(tracked_keypoints_2d)
-        
-        # 确保关键点数量匹配
-        if len(self.keypoints) != len(tracked_keypoints_2d):
-            print(f"关键点数量不匹配: 原有{len(self.keypoints)}个，跟踪到{len(tracked_keypoints_2d)}个")
-            return
-        
-        updated_keypoints = []
-        
-        for i, (kp_2d, is_visible) in enumerate(zip(tracked_keypoints_2d, visibility_mask)):
-            if is_visible:
-                # 关键点可见，转换为三维位置
-                x_pixel, y_pixel = int(kp_2d[0]), int(kp_2d[1])
-                
-                # 检查像素坐标是否在图像范围内
-                if 0 <= x_pixel < depth_image.shape[1] and 0 <= y_pixel < depth_image.shape[0]:
-                    # 获取深度值（单位：毫米）
-                    depth_value = depth_image[y_pixel, x_pixel]
+            # 跟踪关键点
+            status_code, response = self.cotracker_client.track_frame(rgb_image)
+            if status_code == 200:
+                tracked_keypoints_2d = response.get('keypoints', [])
+                if len(tracked_keypoints_2d) > 0:
+                    print(f"成功跟踪到 {len(tracked_keypoints_2d)} 个关键点(2D)")
                     
-                    if depth_value > 0:  # 有效深度值
-                        # 转换为米
-                        z = depth_value / 1000.0
-                        
-                        # 将像素坐标转换为三维坐标
-                        x = (x_pixel - cx) * z / fx
-                        y = (y_pixel - cy) * z / fy
-                        
-                        updated_keypoints.append([x, y, z])
-                        print(f"关键点 {i}: 2D({x_pixel}, {y_pixel}) -> 3D({x:.3f}, {y:.3f}, {z:.3f})")
-                    else:
-                        # 深度值无效，保持原有位置
-                        updated_keypoints.append(self.keypoints[i].tolist())
-                        print(f"关键点 {i}: 深度值无效，保持原有位置")
+                    # 更新2D关键点属性，用于可视化
+                    self.keypoints_2d = tracked_keypoints_2d
+                    
+                    # 获取相机内参
+                    intrinsics_dict = self.get_intrinsics()
+                    if not intrinsics_dict or 'depth' not in intrinsics_dict:
+                        print("无法获取相机内参，保持原有关键点位置")
+                        return False, []
+                    
+                    # 使用CoTrackerClient将2D关键点转换为3D关键点，相机坐标系
+                    keypoints_3d = self.cotracker_client.convert_2d_to_3d(
+                        tracked_keypoints_2d, depth_image, intrinsics_dict['depth']
+                    )
+                    
+                    # 更新关键点
+                    self.update_keypoints(keypoints_3d)
+
+                    # 返回更新后的3D关键点
+                    return True, self.keypoints.tolist() if self.keypoints is not None else []
                 else:
-                    # 像素坐标超出范围，保持原有位置
-                    updated_keypoints.append(self.keypoints[i].tolist())
-                    print(f"关键点 {i}: 像素坐标超出范围，保持原有位置")
+                    print("未检测到关键点")
+                    return False, []
             else:
-                # 关键点不可见，保持原有位置
-                updated_keypoints.append(self.keypoints[i].tolist())
-                print(f"关键点 {i}: 不可见，保持原有位置")
-        
-        # 更新关键点
-        self.keypoints = np.array(updated_keypoints)
-        print(f"已更新 {len(updated_keypoints)} 个关键点的三维位置")
+                print(f"关键点跟踪失败: {status_code}, {response}")
+                return False, []
+                
+        except Exception as e:
+            print(f"跟踪关键点时出错: {e}")
+            return False, []
     
     def compute_target_delta_ee(self, target_pose: np.ndarray) -> Tuple[float, float]:
         """计算当前末端位姿与目标位姿之间的差异"""
@@ -1119,11 +1422,69 @@ class ReKepEnv:
         Returns:
             str: Object identifier for the keypoint
         """
+        # 如果没有_keypoint_object_cache属性，则初始化它
+        if not hasattr(self, '_keypoint_object_cache'):
+            self._keypoint_object_cache = {}
+            
+        # 检查缓存中是否已有该关键点的对象映射
+        if keypoint_index in self._keypoint_object_cache:
+            return self._keypoint_object_cache[keypoint_index]
+            
         # Mock object mapping - 返回None表示没有关联的物体
         # 这样不会影响is_grasping等方法的判断逻辑
         if self.verbose:
             print(f"获取关键点 {keypoint_index} 对应的物体 (mock数据)")
+            
+        # 将结果存入缓存
+        self._keypoint_object_cache[keypoint_index] = None
         return None
+    
+    def draw_keypoints(self, img, keypoints, color=(0, 255, 0), radius=5):
+        """在图像上绘制关键点
+        
+        Args:
+            img (numpy.ndarray): 输入图像
+            keypoints (numpy.ndarray): 关键点坐标
+            color (tuple): 关键点颜色 (B, G, R)
+            radius (int): 关键点半径
+            
+        Returns:
+            numpy.ndarray: 绘制了关键点的图像
+        """
+        img_with_keypoints = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
+        for point in keypoints:
+            x, y = int(point[0]), int(point[1])
+            cv2.circle(img_with_keypoints, (x, y), radius, color, -1)
+        return img_with_keypoints
+    
+    def save_frame_with_keypoints(self, img, keypoints, output_path, depth_image=None, save_dir=None):
+        """保存带有关键点的图像
+        
+        Args:
+            img (numpy.ndarray): 输入图像
+            keypoints (numpy.ndarray): 关键点坐标
+            output_path (str): 输出文件路径
+            depth_image (numpy.ndarray): 深度图像（可选）
+            save_dir (str): 保存目录（可选），如果提供，将覆盖output_path中的目录部分
+        """
+        # 如果提供了保存目录，则使用该目录和output_path的文件名部分
+        if save_dir is not None:
+            # 确保目录存在
+            os.makedirs(save_dir, exist_ok=True)
+            # 获取output_path的文件名部分
+            filename = os.path.basename(output_path)
+            # 组合新的输出路径
+            output_path = os.path.join(save_dir, filename)
+        
+        img_with_keypoints = self.draw_keypoints(img, keypoints)
+        cv2.imwrite(output_path, img_with_keypoints)
+        
+        # 如果提供了深度图像，也保存深度数据
+        if depth_image is not None:
+            depth_path = output_path.replace('.png', '_depth.npy').replace('.jpg', '_depth.npy')
+            np.save(depth_path, depth_image)
+        
+        print(f'Frame saved to {output_path}')
 
 
 # PiperController 别名，直接使用 RobotController

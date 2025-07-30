@@ -47,8 +47,8 @@ def timer_decorator(func):
 
 class CameraIntrinsics:
     """Camera intrinsic parameters."""
-    def __init__(self, fx: float = 489.424683, fy: float = 489.424683, 
-                 ppx: float = 325.761810, ppy: float = 212.508759):
+    def __init__(self, fx: float = 382.06, fy: float = 382.06, 
+                 ppx: float = 321.79, ppy: float = 235.10):
         self.fx = fx
         self.fy = fy
         self.ppx = ppx
@@ -92,11 +92,13 @@ class ActionProcessor:
         # 设置相机内参
         if camera_intrinsics is None:
             intrinsics = self.camera_config['intrinsics']
+            # 统一使用彩色相机内参，realsense获取时已经将深度对齐到了RGB上。
+            color_intrinsics = intrinsics['color']
             self.camera_intrinsics = CameraIntrinsics(
-                fx=intrinsics['fx'],
-                fy=intrinsics['fy'],
-                ppx=intrinsics['ppx'],
-                ppy=intrinsics['ppy']
+                fx=color_intrinsics['fx'],
+                fy=color_intrinsics['fy'],
+                ppx=color_intrinsics['ppx'],
+                ppy=color_intrinsics['ppy']
             )
         else:
             self.camera_intrinsics = camera_intrinsics
@@ -123,6 +125,9 @@ class ActionProcessor:
         
         # Performance monitoring
         self._timers = {}
+        
+        # Initialize program_info to avoid KeyError
+        self.program_info = {}
         
     def _initialize_components(self, global_config: Dict[str, Any]) -> None:
         """Initialize robot environment and solvers."""
@@ -187,6 +192,11 @@ class ActionProcessor:
         """
         start_time = time.time()
         
+        # 设置rekep_program_dir到环境中，以便在创建机器人状态字典时使用
+        self.env.rekep_program_dir = rekep_program_dir
+        # 确保robot对象也能访问到rekep_program_dir
+        self.env.robot.rekep_program_dir = rekep_program_dir
+        
         # Execute the task
         action_file_path = self._execute_task(rekep_program_dir, stage, output_dir)
         
@@ -233,8 +243,7 @@ class ActionProcessor:
         if stage is None or stage ==1:
             # Default to stage 1 (no longer dependent on robot_state.json)
             stage = 1
-            # 移动机械臂到初始位置
-            # 从robot_state.json读取初始关节角度
+            # 从robot_state.json读取初始关节角度用于保存状态
             try:
                 with open('robot_state.json', 'r') as f:
                     initial_state = json.load(f)
@@ -249,46 +258,137 @@ class ActionProcessor:
             except (FileNotFoundError, KeyError) as e:
                 print(f"无法读取robot_state.json,使用默认初始关节角度: {e}")
                 self.init_joint_pos = self.reset_joint_pos
-            # 回到预设初始位置，便于Action以适应场景的第一个动作出发
-            self.env.robot.move_to_joint_positions(self.init_joint_pos)
             print(f"{bcolors.OKBLUE}No stage specified, defaulting to stage 1{bcolors.ENDC}")
         
         stage = int(stage)
         
         # Get current robot state
-        scene_keypoints = self.env.get_keypoint_positions()
-        print(f"Camera frame keypoints: {scene_keypoints}")
+        # 如果还没有获取过关键点位置,则获取一次并缓存
+        if not hasattr(self, '_cached_scene_keypoints_3d'):
+            self._cached_scene_keypoints_3d = self.env.get_keypoint_positions()
+        scene_keypoints_3d = self._cached_scene_keypoints_3d
+        print(f"Camera frame keypoints (3D): {scene_keypoints_3d}")
         
         # Transform keypoints from camera to world coordinates
-        scene_keypoints = self.transform_keypoints_to_world(scene_keypoints)
-        print(f"World frame keypoints: {scene_keypoints}")
+        world_keypoints_3d = self.transform_keypoints_to_world(scene_keypoints_3d)
+        print(f"World frame keypoints (3D): {world_keypoints_3d}")
         
+
         # Get current robot state directly from robot (no file dependency)
         self.curr_ee_location = self.env.get_ee_location()  # 3D position [x,y,z] in meters
         tcp_pose = self.env.robot.get_tcp_pose()  # [x,y,z,rx,ry,rz] - position + rotation
         self.curr_joint_pos = self.get_joint_pos()  # Joint angles in radians
         
         # Extract orientation from TCP pose (rotation components)
-        ee_orientation_euler = tcp_pose[3:6]  # [rx, ry, rz] rotation angles in degrees
+        ee_orientation_euler_deg = tcp_pose[3:6]  # [rx, ry, rz] rotation angles in degrees
+        
+        # Convert to radians for consistency with robot_state.json
+        ee_orientation_euler = np.radians(ee_orientation_euler_deg)  # [rx, ry, rz] in radians
         
         # Convert euler angles to quaternion for compatibility with execute_endpose_action.py
         # scipy quaternion format: [x, y, z, w]
-        # ee_orientation_quat = R.from_euler('xyz', ee_orientation_euler, degrees=True).as_quat()
-        # ee_orientation_quat = R.from_euler('yzx', np.radians(ee_orientation_euler), degrees=False).as_quat()
-        ee_orientation_quat = R.from_euler('yzx', ee_orientation_euler, degrees=True).as_quat()
+        ee_orientation_quat = R.from_euler('xyz', ee_orientation_euler_deg, degrees=True).as_quat()
         # Create complete pose in quaternion format [x,y,z,qx,qy,qz,qw]
         self.curr_ee_pose = np.concatenate([tcp_pose[:3], ee_orientation_quat])
         
         # Combine end-effector and scene keypoints (now both in meters)
-        self.keypoints = np.concatenate([[self.curr_ee_location], scene_keypoints], axis=0)
+        self.keypoints = np.concatenate([[self.curr_ee_location], world_keypoints_3d], axis=0)
         print(f"Combined keypoints(end-effector and scene keypoints): {self.keypoints}")
+        
+        # 获取原始数据用于raw_data字段
+        try:
+            # 获取当前末端位姿原始数据
+            arm_end_pose_msgs = self.env.robot.piper.GetArmEndPoseMsgs()
+            end_pose_raw = {
+                'X_axis': arm_end_pose_msgs.end_pose.X_axis,
+                'Y_axis': arm_end_pose_msgs.end_pose.Y_axis,
+                'Z_axis': arm_end_pose_msgs.end_pose.Z_axis,
+                'RX_axis': arm_end_pose_msgs.end_pose.RX_axis,
+                'RY_axis': arm_end_pose_msgs.end_pose.RY_axis,
+                'RZ_axis': arm_end_pose_msgs.end_pose.RZ_axis,
+                'position_unit': '0.001 mm',
+                'orientation_unit': '0.001 degrees'
+            }
+            
+            # 获取当前关节角度原始数据
+            joint_msgs = self.env.robot.piper.GetArmJointMsgs()
+            joint_angles_raw = {
+                'joint_1': joint_msgs.joint_state.joint_1,
+                'joint_2': joint_msgs.joint_state.joint_2,
+                'joint_3': joint_msgs.joint_state.joint_3,
+                'joint_4': joint_msgs.joint_state.joint_4,
+                'joint_5': joint_msgs.joint_state.joint_5,
+                'joint_6': joint_msgs.joint_state.joint_6,
+                'unit': '0.001 degrees'
+            }
+        except Exception as e:
+            print(f"获取原始数据时发生错误: {e}，使用模拟数据")
+            # 使用模拟数据
+            # 将米转换为0.001毫米
+            pos_factor = 1000000
+            # 将弧度转换为0.001度
+            rot_factor = 180 * 1000 / np.pi
+            
+            end_pose_raw = {
+                'X_axis': int(self.curr_ee_location[0] * pos_factor),
+                'Y_axis': int(self.curr_ee_location[1] * pos_factor),
+                'Z_axis': int(self.curr_ee_location[2] * pos_factor),
+                'RX_axis': int(ee_orientation_euler[0] * rot_factor),
+                'RY_axis': int(ee_orientation_euler[1] * rot_factor),
+                'RZ_axis': int(ee_orientation_euler[2] * rot_factor),
+                'position_unit': '0.001 mm',
+                'orientation_unit': '0.001 degrees'
+            }
+            
+            joint_angles_raw = {
+                'joint_1': int(self.curr_joint_pos[0] * rot_factor),
+                'joint_2': int(self.curr_joint_pos[1] * rot_factor),
+                'joint_3': int(self.curr_joint_pos[2] * rot_factor),
+                'joint_4': int(self.curr_joint_pos[3] * rot_factor),
+                'joint_5': int(self.curr_joint_pos[4] * rot_factor),
+                'joint_6': int(self.curr_joint_pos[5] * rot_factor),
+                'unit': '0.001 degrees'
+            }
         
         # Store complete robot state in rekep_program_dir using real-time data
         robot_state = {
+            'timestamp': time.time(),
             'rekep_stage': stage,
-            'ee_info':{'ee_position': self.curr_ee_location.tolist(),
-                        'ee_orientation': ee_orientation_quat.tolist()},  # Quaternion [x,y,z,w]
-            'joint_positions': self.curr_joint_pos.tolist(),
+            'joint_info': {
+                'joint_positions': self.curr_joint_pos.tolist(),
+                'reset_joint_pos': self.init_joint_pos.tolist()
+            },
+            'initial_position': {
+                'joint_positions': self.init_joint_pos.tolist(),
+                'ee_position': self.curr_ee_location.tolist(),
+                'ee_orientation': ee_orientation_euler.tolist()
+            },
+            'ee_info': {
+                'position': self.curr_ee_location.tolist(),
+                'orientation': {
+                    'quaternion': ee_orientation_quat.tolist(),
+                    'euler': ee_orientation_euler.tolist(),
+                    'unit': 'radians',
+                    'description': 'End effector orientation in radians [rx, ry, rz]'
+                }
+            },
+            'gripper_info': {
+                'state': 0.0  # 默认为打开状态
+            },
+            'safety_info': {
+                'collision_status': 'false',
+                'safety_status': 'normal',
+                'errors': []
+            },
+            'control_info': {
+                'control_mode': 'position',
+                'operation_mode': 'auto'
+            },
+            'misc': {},
+            'raw_data': {
+                'joint_angles_raw': joint_angles_raw,
+                'end_pose_raw': end_pose_raw
+            },
             'keypoints': self.keypoints[1:].tolist() # 不包括末端位置关键点
         }
         with open(os.path.join(rekep_program_dir, f'robot_state_{stage}.json'), 'w') as f:
@@ -405,7 +505,7 @@ class ActionProcessor:
         
         print(f"Subgoal constraints: {subgoal_constraints}")
         print(f"Path constraints: {path_constraints}")
-        
+        print(self.keypoint_movable_mask)
         subgoal_pose, debug_dict = self.subgoal_solver.solve(
             self.curr_ee_pose,
             self.keypoints,
@@ -500,7 +600,22 @@ class ActionProcessor:
         # Create action sequence (8 dimensions: 7 for pose + 1 for gripper)
         ee_action_seq = np.zeros((dense_path.shape[0], 8))
         ee_action_seq[:, :7] = dense_path
-        ee_action_seq[:, 7] = self.env.get_gripper_null_action()
+        
+        # Set gripper actions based on stage type
+        if self.is_grasp_stage:
+            # For grasping stage: keep gripper open during movement, close at the end
+            ee_action_seq[:-1, 7] = self.env.get_gripper_open_action()  # Keep open during movement
+            ee_action_seq[-1, 7] = self.env.get_gripper_close_action()   # Close at the end
+            print(f"抓取阶段：路径中保持夹爪打开，最后一步关闭夹爪")
+        elif self.is_release_stage:
+            # For release stage: keep gripper closed during movement, open at the end
+            ee_action_seq[:-1, 7] = self.env.get_gripper_close_action()  # Keep closed during movement
+            ee_action_seq[-1, 7] = self.env.get_gripper_open_action()    # Open at the end
+            print(f"释放阶段：路径中保持夹爪关闭，最后一步打开夹爪")
+        else:
+            # For other stages: maintain current gripper state
+            ee_action_seq[:, 7] = self.env.get_gripper_null_action()
+            print(f"普通移动阶段：保持夹爪状态不变")
         
         return ee_action_seq
     
@@ -523,8 +638,10 @@ class ActionProcessor:
         
         # Initialize stage state
         self.action_queue = []
-        self._update_keypoint_movable_mask()
-        self.first_iter = True
+        # TODO 使用真实的抓取检测
+        self._update_keypoint_movable_mask_mock()
+        if stage == 1:
+            self.first_iter = True
     
     def _load_camera_config(self) -> Dict[str, Any]:
         """加载相机配置文件
@@ -541,8 +658,10 @@ class ActionProcessor:
             return {
                 'resolution': {'width': 640, 'height': 480, 'fps': 30},
                 'intrinsics': {
-                    'fx': 489.424683, 'fy': 489.424683,
-                    'ppx': 325.761810, 'ppy': 212.508759,
+                    'color': {
+                        'fx': 606.60, 'fy': 605.47,
+                        'ppx': 323.69, 'ppy': 247.12
+                    },
                     'depth_scale': 0.001
                 },
                 'processing': {'resize_width': 640, 'resize_height': 480}
@@ -554,7 +673,28 @@ class ActionProcessor:
             keypoint_object = self.env.get_object_by_keypoint(i - 1)
             self.keypoint_movable_mask[i] = self.env.is_grasping(keypoint_object)
     
-    def transform_keypoints_to_world(self, keypoints: np.ndarray) -> np.ndarray:
+    def _update_keypoint_movable_mask_mock(self) -> None:
+        """Mock version: Update which keypoints can be moved based on previous grasp stages.
+        
+        This mock version directly sets keypoints as movable if they were grasped 
+        in previous stages, without relying on the environment's grasping state.
+        """
+        # Reset all keypoints to not movable (except ee)
+        for i in range(1, len(self.keypoint_movable_mask)):
+            self.keypoint_movable_mask[i] = False
+        
+        
+        # Check all previous stages for grasped keypoints
+        for stage_idx in range(self.stage-1):
+            grasp_keypoint_idx = self.program_info['grasp_keypoints'][stage_idx]
+            if grasp_keypoint_idx != -1:  # -1 means no grasp in this stage
+                # Convert to keypoint_movable_mask index (add 1 because first is ee)
+                mask_idx = grasp_keypoint_idx + 1
+                if mask_idx < len(self.keypoint_movable_mask):
+                    self.keypoint_movable_mask[mask_idx] = True
+                    print(f"Mock: Setting keypoint {grasp_keypoint_idx} as movable (grasped in stage {stage_idx + 1})")
+    
+    def transform_keypoints_to_world(self, keypoints: np.ndarray, hand_in_eye:bool=True) -> np.ndarray:
         """Transform keypoints from camera coordinate system to robot base coordinate system.
         
         Uses Eye-to-Hand calibration results with coordinate axis alignment correction.
@@ -565,20 +705,56 @@ class ActionProcessor:
             X right, Y down, Z forward
             
         Args:
-            keypoints: Keypoints in camera coordinate system
+            keypoints: Keypoints in camera coordinate system (3D)
+            hand_in_eye: Whether the hand is in the eye coordinate system, default is True
             
         Returns:
             Keypoints in robot base coordinate system
         """
-        keypoints = np.array(keypoints)
-        keypoints_homogeneous = np.hstack((keypoints, np.ones((keypoints.shape[0], 1))))
-        
-        # Load base → camera extrinsic matrix
-        T_camera_to_base = self.load_camera_extrinsics()
-        
-        # Apply transformation
-        base_coords_homogeneous = (T_camera_to_base @ keypoints_homogeneous.T).T
-        base_coords = base_coords_homogeneous[:, :3] / base_coords_homogeneous[:, 3, np.newaxis]
+        if hand_in_eye:
+            # 注意：这里由于标定的坐标系不相同，需要一些转换，具体参考标定结果。
+            # 直接使用原始关键点,不做坐标系修正
+            keypoints_standard = keypoints.copy()
+            # 加载手眼标定结果
+            T_standard_gripper2cam = self.load_camera_extrinsics()
+            R_standard_gripper2cam = T_standard_gripper2cam[:3, :3]
+            t_standard_gripper2cam = T_standard_gripper2cam[:3, 3]
+
+            # 获取当前机械臂末端底座位姿
+            gripper_base_pose = self.env.robot.get_gripper_base_pose()  # [x,y,z,rx,ry,rz]
+            x,y,z,rx,ry,rz = gripper_base_pose
+            rx,ry,rz = np.deg2rad([rx,ry,rz])
+            R_base2gripper = R.from_euler('xyz', [rx,ry,rz]).as_matrix()
+            t_base2gripper = np.array([x,y,z]).reshape(3,1)
+            
+            # 将所有关键点转换为齐次坐标形式
+            keypoints_cam = np.array(keypoints_standard)
+            keypoints_cam_homogeneous = np.hstack((keypoints_cam, np.ones((keypoints_cam.shape[0], 1))))
+
+            # 构建从相机到机械臂基座的变换矩阵
+            T_gripper2cam = np.eye(4)
+            T_gripper2cam[:3, :3] = R_standard_gripper2cam
+            T_gripper2cam[:3, 3] = t_standard_gripper2cam.reshape(3)
+
+            T_base2gripper = np.eye(4)
+            T_base2gripper[:3, :3] = R_base2gripper
+            T_base2gripper[:3, 3] = t_base2gripper.reshape(3)
+
+            # 一次性完成所有变换
+            T_total = T_base2gripper @ T_gripper2cam
+            base_coords_homogeneous = (T_total @ keypoints_cam_homogeneous.T).T
+            base_coords = base_coords_homogeneous[:, :3]
+                
+        else:
+            keypoints = np.array(keypoints)
+            keypoints_homogeneous = np.hstack((keypoints, np.ones((keypoints.shape[0], 1))))
+            
+            # Load base → camera extrinsic matrix
+            T_camera_to_base = self.load_camera_extrinsics()
+            
+            # Apply transformation
+            base_coords_homogeneous = (T_camera_to_base @ keypoints_homogeneous.T).T
+            base_coords = base_coords_homogeneous[:, :3] / base_coords_homogeneous[:, 3, np.newaxis]
         
         return base_coords
     

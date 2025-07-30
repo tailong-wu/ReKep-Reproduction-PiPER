@@ -1,143 +1,147 @@
-device: &device 'cuda'
-seed: &seed 0
-
-main:
-  interpolate_pos_step_size: &interpolate_pos_step_size 0.05  # controls the density of the final returned path
-  interpolate_rot_step_size: &interpolate_rot_step_size 0.34  # about 20 degrees
-  grasp_depth: 0.10
-  constraint_tolerance: 0.10  # for backtracking
-  # bounds_min: &bounds_min [-0.3, -0.4, 0.5] # how to encode the workspace?
-  # bounds_max: &bounds_max [0.30, 0.4, 0.6]
-  bounds_min: &bounds_min [-1.0, -1.0, -1.0] # how to encode the workspace?
-  bounds_max: &bounds_max [1.0, 1.0, 1.0]
-  sdf_voxel_size: 0.01
-  vlm_camera: 0
-  action_steps_per_iter: 5
-  seed: *seed
-
-env:
-  video_cache_size: 2000
-  og_sim:
-    physics_frequency: 100
-    action_frequency: 15
-    
-  scene:
-    name: Rs_int
-    type: InteractiveTraversableScene
-    scene_model: Rs_int
-
-  bounds_min: *bounds_min
-  bounds_max: *bounds_max
-  interpolate_pos_step_size: *interpolate_pos_step_size
-  interpolate_rot_step_size: *interpolate_rot_step_size
-
-  robot:
-    robot_config:
-      name: Fetch
-      type: Fetch
-      obs_modalities: [rgb, depth]
-      action_modalities: continuous
-      action_normalize: False
-      position: [-0.8, 0.0, 0.]
-      grasping_mode: assisted
-
-      controller_config:
-        base:
-          name: DifferentialDriveController
-        arm_0:
-          name: OperationalSpaceController
-          kp: 250
-          kp_limits: [50, 400]
-          damping_ratio: 0.6
-        gripper_0:
-          name: MultiFingerGripperController
-          command_input_limits: [0.0, 1.0]
-          mode: smooth
-        camera:
-          name: JointController
-
-  camera:
-    # recorder 
-    1:
-      name: cam_1
-      position: [ 0.6137,  0.4764,  1.4565]
-      orientation: [ 0.3212,  0.4682,  0.6788,  0.4656]
-      resolution: 480
-
-    # vlm camera
-    0:
-      name: cam_0
-      position: [-0.1655,  0.0167,  1.3664]
-      orientation: [ 0.0550,  0.0544,  0.7010,  0.7090]
-      resolution: 480
-
-
-perception:
-  cameras:
-    zed2:
-      resolution: [1280, 720]
-      fps: 30
-    depth_pro:
-      resolution: [640, 480]
-      fps: 60
-  fusion:
-    registration_method: "icp"
-    voxel_size: 0.01
-
 actor_critic:
   actor:
-    model: "gpt-4o"
-    temperature: 0.8
     max_tokens: 1000
+    model: gpt-4o
+    temperature: 0.8
   critic:
-    semantic_weight: 0.4
     geometric_weight: 0.6
-
-# policy:
-#   diffusion:
-#     num_steps: 100
-#     beta_schedule: "linear"
-#   rl:
-#     algorithm: "sac"
-#     reward_shaping: True
-
-path_solver:
-  opt_pos_step_size: 0.20  # controls the density of control points in the path
-  opt_rot_step_size: 0.78  # controls the density of control points in the path
-  opt_interpolate_pos_step_size: 0.02  # controls the density of collision checking inside optimization
-  opt_interpolate_rot_step_size: 0.10
-  max_collision_points: 60
-  sampling_maxfun: 5000
-  bounds_min: *bounds_min
-  bounds_max: *bounds_max
-  constraint_tolerance: 0.0001
-  minimizer_options:
-    maxiter: 200
-
-subgoal_solver:
-  bounds_min: *bounds_min
-  bounds_max: *bounds_max
-  sampling_maxfun: 5000
-  max_collision_points: 60
-  constraint_tolerance: 0.0001
-  minimizer_options:
-    maxiter: 200
-
-keypoint_proposer:
-  num_candidates_per_mask: 3
-  # min_dist_bt_keypoints: 0.08
-  min_dist_bt_keypoints: 0.04
-  max_mask_ratio: 0.5
-  device: *device
-  bounds_min: *bounds_min
-  bounds_max: *bounds_max
-  seed: *seed
-
+    semantic_weight: 0.4
 constraint_generator:
-  model: chatgpt-4o-latest
-  temperature: 0.0
   max_tokens: 4096
-
+  model: gpt-4.1
+  temperature: 0.0
+device: cuda
+env:
+  bounds_max: &id001
+  - 0.495789
+  - 0.46111599999999997
+  - 0.5627120000000001
+  bounds_min: &id002
+  - -0.068104
+  - -0.276093
+  -  0.00
+  camera:
+    0:
+      name: cam_0
+      orientation:
+      - 0.055
+      - 0.0544
+      - 0.701
+      - 0.709
+      position:
+      - -0.1655
+      - 0.0167
+      - 1.3664
+      resolution: 480
+    1:
+      name: cam_1
+      orientation:
+      - 0.3212
+      - 0.4682
+      - 0.6788
+      - 0.4656
+      position:
+      - 0.6137
+      - 0.4764
+      - 1.4565
+      resolution: 480
+  interpolate_pos_step_size: 0.05
+  interpolate_rot_step_size: 0.34
+  og_sim:
+    action_frequency: 15
+    physics_frequency: 100
+  robot:
+    robot_config:
+      action_modalities: continuous
+      action_normalize: false
+      controller_config:
+        arm_0:
+          damping_ratio: 0.6
+          kp: 250
+          kp_limits:
+          - 50
+          - 400
+          name: OperationalSpaceController
+        base:
+          name: DifferentialDriveController
+        camera:
+          name: JointController
+        gripper_0:
+          command_input_limits:
+          - 0.0
+          - 1.0
+          mode: smooth
+          name: MultiFingerGripperController
+      grasping_mode: assisted
+      name: Fetch
+      obs_modalities:
+      - rgb
+      - depth
+      position:
+      - -0.8
+      - 0.0
+      - 0.0
+      type: Fetch
+  scene:
+    name: Rs_int
+    scene_model: Rs_int
+    type: InteractiveTraversableScene
+  video_cache_size: 2000
+keypoint_proposer:
+  bounds_max: *id001
+  bounds_min: *id002
+  device: cuda
+  max_mask_ratio: 0.5
+  min_dist_bt_keypoints: 0.04
+  num_candidates_per_mask: 3
+  seed: 0
+main:
+  action_steps_per_iter: 5
+  bounds_max: *id001
+  bounds_min: *id002
+  constraint_tolerance: 0.1
+  grasp_depth: 0.1
+  interpolate_pos_step_size: 0.05
+  interpolate_rot_step_size: 0.34
+  sdf_voxel_size: 0.01
+  seed: 0
+  vlm_camera: 0
+path_solver:
+  bounds_max: *id001
+  bounds_min: *id002
+  constraint_tolerance: 0.0001
+  max_collision_points: 60
+  minimizer_options:
+    maxiter: 200
+  opt_interpolate_pos_step_size: 0.02
+  opt_interpolate_rot_step_size: 0.1
+  opt_pos_step_size: 0.2
+  opt_rot_step_size: 0.78
+  sampling_maxfun: 5000
+perception:
+  cameras:
+    depth_pro:
+      fps: 60
+      resolution:
+      - 640
+      - 480
+    zed2:
+      fps: 30
+      resolution:
+      - 1280
+      - 720
+  fusion:
+    registration_method: icp
+    voxel_size: 0.01
+seed: 0
+subgoal_solver:
+  bounds_max: *id001
+  bounds_min: *id002
+  constraint_tolerance: 0.0001
+  max_collision_points: 60
+  minimizer_options:
+    maxiter: 200
+  sampling_maxfun: 5000
 visualizer:
-  bounds_min: *bounds_min
-  bounds_max: *bounds_max
+  bounds_max: *id001
+  bounds_min: *id002

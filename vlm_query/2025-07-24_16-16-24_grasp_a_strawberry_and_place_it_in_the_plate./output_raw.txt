@@ -1,0 +1,57 @@
+```python
+
+# Explanation:
+# The task is "Grasp a strawberry and place it in the plate."
+# From the image, keypoints 4, 5, 6, 7 are strawberries, and 0, 1, 2 are on the plate.
+# The task can be broken down into 2 stages:
+# 1. Grasp a strawberry (let's choose keypoint 4 for concreteness).
+# 2. Place the strawberry in the plate (let's use the center of the plate, which can be approximated as the mean of keypoints 0, 1, 2).
+
+num_stages = 2
+
+### stage 1 sub-goal constraints (grasp strawberry)
+def stage1_subgoal_constraint1(end_effector, keypoints):
+    """
+    Align the end-effector with the strawberry at keypoint 4.
+    The cost is the Euclidean distance between the end-effector and keypoint 4.
+    """
+    cost = np.linalg.norm(end_effector - keypoints[4])
+    return cost
+
+# No path constraints for grasping stage
+
+### stage 2 sub-goal constraints (place strawberry in plate)
+def stage2_subgoal_constraint1(end_effector, keypoints):
+    """
+    The strawberry (keypoint 4) is at the center of the plate (mean of keypoints 0, 1, 2).
+    The cost is the Euclidean distance between keypoint 4 and the plate center.
+    """
+    plate_center = (keypoints[0] + keypoints[1] + keypoints[2]) / 3.0
+    cost = np.linalg.norm(keypoints[4] - plate_center)
+    return cost
+
+# No need for a second sub-goal constraint, as orientation is not specified.
+
+### stage 2 path constraints
+def stage2_path_constraint1(end_effector, keypoints):
+    """
+    The robot must still be grasping the strawberry at keypoint 4 during this stage.
+    """
+    return get_grasping_cost_by_keypoint_idx(4)
+
+# No other path constraints needed.
+
+"""
+Summarize keypoints to be grasped in all grasping stages.
+Stage 1: grasp keypoint 4 (strawberry)
+Stage 2: not a grasping stage, so -1
+"""
+grasp_keypoints = [4, -1]
+
+"""
+Summarize at **the end of which stage** the robot should release the keypoints.
+Release the strawberry (keypoint 4) at the end of stage 2 (after placing it in the plate).
+"""
+release_keypoints = [-1, 4]
+
+```

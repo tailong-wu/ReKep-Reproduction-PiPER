@@ -43,14 +43,31 @@ class Visualizer:
         self.bounds_max = np.array(self.config['bounds_max'])
         self.color = np.array([0.05, 0.55, 0.26])
         
-        # Camera intrinsics for ZED camera
-        self.camera_intrinsics = {
-            'fx': 527.53936768,
-            'fy': 527.53936768,
-            'cx': 646.46374512,
-            'cy': 353.03808594,
-            'depth_scale': 0.001  # Convert mm to meters
-        }
+        # 尝试从配置文件加载相机内参
+        try:
+            import yaml
+            with open('./configs/camera_config.yaml', 'r') as f:
+                camera_config = yaml.safe_load(f)
+                
+            # 使用彩色相机内参
+            color_intrinsics = camera_config['intrinsics']['color']
+            self.camera_intrinsics = {
+                'fx': color_intrinsics['fx'],
+                'fy': color_intrinsics['fy'],
+                'cx': color_intrinsics['ppx'],
+                'cy': color_intrinsics['ppy'],
+                'depth_scale': camera_config['intrinsics']['depth_scale']  # Convert mm to meters
+            }
+        except Exception as e:
+            print(f"无法加载相机配置，使用默认内参: {e}")
+            # 默认相机内参
+            self.camera_intrinsics = {
+                'fx': 527.53936768,
+                'fy': 527.53936768,
+                'cx': 646.46374512,
+                'cy': 353.03808594,
+                'depth_scale': 0.001  # Convert mm to meters
+            }
         
         # Default view matrix (can be adjusted based on your camera setup)
         self.world2viewer = np.array([
@@ -141,13 +158,14 @@ class Visualizer:
         # subgoal
         collision_points = self.env.get_collision_points(noise=False)
         # transform collision points to the subgoal frame
-        ee_pose = self.env.get_ee_pose()
-        ee_pose_homo = convert_pose_quat2mat(ee_pose)
-        centering_transform = np.linalg.inv(ee_pose_homo)
-        collision_points_centered = np.dot(collision_points, centering_transform[:3, :3].T) + centering_transform[:3, 3]
-        transformed_collision_points = batch_transform_points(collision_points_centered, subgoal_pose_homo[None]).reshape(-1, 3)
-        collision_points_colors = np.array([self.color] * len(collision_points))
-        add_to_visualize_buffer(visualize_buffer, transformed_collision_points, collision_points_colors)
+        if collision_points is not None:
+            ee_pose = self.env.get_ee_pose()
+            ee_pose_homo = convert_pose_quat2mat(ee_pose)
+            centering_transform = np.linalg.inv(ee_pose_homo)
+            collision_points_centered = np.dot(collision_points, centering_transform[:3, :3].T) + centering_transform[:3, 3]
+            transformed_collision_points = batch_transform_points(collision_points_centered, subgoal_pose_homo[None]).reshape(-1, 3)
+            collision_points_colors = np.array([self.color] * len(collision_points))
+            add_to_visualize_buffer(visualize_buffer, transformed_collision_points, collision_points_colors)
         # add keypoints
         keypoints = self.env.get_keypoint_positions()
         num_keypoints = keypoints.shape[0]
@@ -196,19 +214,20 @@ class Visualizer:
         path_length = path.shape[0]
         # path points
         collision_points = self.env.get_collision_points(noise=False)
-        num_points = collision_points.shape[0]
-        start_pose = self.env.get_ee_pose()
-        centering_transform = np.linalg.inv(convert_pose_quat2mat(start_pose))
-        collision_points_centered = np.dot(collision_points, centering_transform[:3, :3].T) + centering_transform[:3, 3]
-        poses_homo = convert_pose_quat2mat(path[:, :7])  # the last number is gripper action
-        transformed_collision_points = batch_transform_points(collision_points_centered, poses_homo).reshape(-1, 3)  # (num_poses, num_points, 3)
-        # calculate color based on the timestep
-        collision_points_colors = np.ones([path_length, num_points, 3]) * self.color[None, None]
-        for t in range(path_length):
-            whitening_coef = 0.3 + 0.5 * (t / path_length)
-            collision_points_colors[t] = (1 - whitening_coef) * collision_points_colors[t] + whitening_coef * np.array([1, 1, 1])
-        collision_points_colors = collision_points_colors.reshape(-1, 3)
-        add_to_visualize_buffer(visualize_buffer, transformed_collision_points, collision_points_colors)
+        if collision_points is not None:
+            num_points = collision_points.shape[0]
+            start_pose = self.env.get_ee_pose()
+            centering_transform = np.linalg.inv(convert_pose_quat2mat(start_pose))
+            collision_points_centered = np.dot(collision_points, centering_transform[:3, :3].T) + centering_transform[:3, 3]
+            poses_homo = convert_pose_quat2mat(path[:, :7])  # the last number is gripper action
+            transformed_collision_points = batch_transform_points(collision_points_centered, poses_homo).reshape(-1, 3)  # (num_poses, num_points, 3)
+            # calculate color based on the timestep
+            collision_points_colors = np.ones([path_length, num_points, 3]) * self.color[None, None]
+            for t in range(path_length):
+                whitening_coef = 0.3 + 0.5 * (t / path_length)
+                collision_points_colors[t] = (1 - whitening_coef) * collision_points_colors[t] + whitening_coef * np.array([1, 1, 1])
+            collision_points_colors = collision_points_colors.reshape(-1, 3)
+            add_to_visualize_buffer(visualize_buffer, transformed_collision_points, collision_points_colors)
         # keypoints
         keypoints = self.env.get_keypoint_positions()
         num_keypoints = keypoints.shape[0]
